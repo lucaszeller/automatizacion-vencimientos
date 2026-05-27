@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import sys
 
 try:
     from dotenv import load_dotenv
@@ -11,7 +12,14 @@ except ModuleNotFoundError:
         return False
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).resolve().parent
+    RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
+else:
+    APP_DIR = Path(__file__).resolve().parent.parent
+    RESOURCE_DIR = APP_DIR
+
+BASE_DIR = APP_DIR
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -53,15 +61,20 @@ class Settings:
     respaldos_dir: Path
 
 
-def resolve_path(value: str) -> Path:
+def resolve_path(value: str, resource: bool = False) -> Path:
     path = Path(value)
     if path.is_absolute():
         return path
-    return BASE_DIR / path
+    app_path = APP_DIR / path
+    if resource:
+        if app_path.exists():
+            return app_path
+        return RESOURCE_DIR / path
+    return app_path
 
 
 def load_settings(force_test: bool = False) -> Settings:
-    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(APP_DIR / ".env")
     modo_prueba = _bool_env("MODO_PRUEBA", True)
     data_source = os.getenv("DATA_SOURCE", "database").strip().lower()
     if force_test:
@@ -80,7 +93,7 @@ def load_settings(force_test: bool = False) -> Settings:
         db_user=os.getenv("DB_USER", ""),
         db_password=os.getenv("DB_PASSWORD", ""),
         db_driver=os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server"),
-        db_query_path=resolve_path(os.getenv("DB_QUERY_PATH", "sql/tacticasoft_services.sql")),
+        db_query_path=resolve_path(os.getenv("DB_QUERY_PATH", "sql/tacticasoft_services.sql"), resource=True),
         dias_antes_aviso=int(os.getenv("DIAS_ANTES_AVISO", "7")),
         horas_para_proximo_service=float(os.getenv("HORAS_PARA_PROXIMO_SERVICE", "250")),
         reenviar_aviso=_bool_env("REENVIAR_AVISO", False),

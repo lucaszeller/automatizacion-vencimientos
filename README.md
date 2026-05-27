@@ -24,6 +24,30 @@ python main.py --test
 python main.py --run
 ```
 
+Para abrir la interfaz:
+
+```bash
+python main.py --ui
+```
+
+O con doble click en `Abrir Alertas Services.bat`.
+
+## Generar EXE
+
+En la PC de desarrollo, ejecutar:
+
+```bash
+Crear EXE.bat
+```
+
+El ejecutable queda en:
+
+```text
+dist/Alertas Services.exe
+```
+
+Para usarlo en otra PC, copiar junto al EXE el archivo `.env` configurado. El usuario final no necesita instalar Python ni dependencias.
+
 ## TacticaSoft
 
 La app espera que `sql/tacticasoft_services.sql` devuelva estas columnas con alias:

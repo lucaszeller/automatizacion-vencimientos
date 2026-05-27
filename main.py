@@ -69,7 +69,7 @@ def run(force_test: bool = False, only_excel: bool = False, only_mails: bool = F
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Alertas mensuales de services")
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--run", action="store_true", help="Ejecuta el proceso completo con la configuracion actual")
     group.add_argument("--test", action="store_true", help="Ejecuta una prueba con datos simulados y sin mails reales")
     group.add_argument("--generate-excel", action="store_true", help="Genera Excel sin enviar mails")
@@ -96,6 +96,12 @@ def parse_period(value: str) -> tuple[date, date]:
 
 
 def main() -> int:
+    if len(sys.argv) == 1:
+        from app.ui import launch_ui
+
+        launch_ui()
+        return 0
+
     args = parse_args()
     try:
         if args.ui:
