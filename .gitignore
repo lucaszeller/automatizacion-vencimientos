@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.mp4
+.pytest_cache/
+data/reportes/*.xlsx
+data/enviados/*.xlsx
+data/logs/*.txt
+data/errores/*.txt
+data/entrada/servicios_prueba.xlsx
