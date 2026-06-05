@@ -20,6 +20,7 @@ REQUIRED_COLUMNS = [
     "tipo_service",
     "lugar",
     "mail_cliente",
+    "telefono_cliente",
     "observaciones",
 ]
 
@@ -50,6 +51,13 @@ def normalize_service_data(df: pd.DataFrame) -> pd.DataFrame:
         "serializado": "serial",
         "mail": "mail_cliente",
         "email": "mail_cliente",
+        "telefono": "telefono_cliente",
+        "tel": "telefono_cliente",
+        "celular": "telefono_cliente",
+        "movil": "telefono_cliente",
+        "whatsapp": "telefono_cliente",
+        "telefono contacto": "telefono_cliente",
+        "telefono cliente": "telefono_cliente",
     }
     df = df.rename(columns={col: aliases.get(col, col) for col in df.columns})
     for column in REQUIRED_COLUMNS:
@@ -64,6 +72,7 @@ def normalize_service_data(df: pd.DataFrame) -> pd.DataFrame:
     normalized["tipo_service"] = normalized["tipo_service"].map(clean_text)
     normalized["lugar"] = normalized["lugar"].map(clean_text)
     normalized["mail_cliente"] = normalized["mail_cliente"].map(clean_text)
+    normalized["telefono_cliente"] = normalized["telefono_cliente"].map(clean_text)
     normalized["observaciones"] = normalized["observaciones"].map(clean_text)
     normalized["tipo_service"] = normalized.apply(_complete_tipo_service, axis=1)
     normalized["fecha_service"] = normalized["fecha_service"].map(to_date)
@@ -101,6 +110,7 @@ def build_sample_data() -> pd.DataFrame:
                 "tipo_service": "250 Hs",
                 "lugar": "ZONA",
                 "mail_cliente": "cliente.proximo@example.com",
+                "telefono_cliente": "5491111111111",
                 "observaciones": "",
             },
             {
@@ -113,6 +123,7 @@ def build_sample_data() -> pd.DataFrame:
                 "tipo_service": "1000 Hs",
                 "lugar": "ZONA",
                 "mail_cliente": "cliente.proximo@example.com",
+                "telefono_cliente": "5491111111111",
                 "observaciones": "",
             },
             {
@@ -125,6 +136,7 @@ def build_sample_data() -> pd.DataFrame:
                 "tipo_service": "500 Hs",
                 "lugar": "TALLER",
                 "mail_cliente": "",
+                "telefono_cliente": "",
                 "observaciones": "",
             },
             {
@@ -137,6 +149,7 @@ def build_sample_data() -> pd.DataFrame:
                 "tipo_service": "250 Hs",
                 "lugar": "TALLER",
                 "mail_cliente": "",
+                "telefono_cliente": "",
                 "observaciones": "",
             },
             {
@@ -149,6 +162,7 @@ def build_sample_data() -> pd.DataFrame:
                 "tipo_service": "1000 Hs",
                 "lugar": "ZONA",
                 "mail_cliente": "cliente.ok@example.com",
+                "telefono_cliente": "5491199999999",
                 "observaciones": "",
             },
             {
@@ -161,6 +175,7 @@ def build_sample_data() -> pd.DataFrame:
                 "tipo_service": "750 Hs",
                 "lugar": "ZONA",
                 "mail_cliente": "cliente.ok@example.com",
+                "telefono_cliente": "5491199999999",
                 "observaciones": "",
             },
         ]

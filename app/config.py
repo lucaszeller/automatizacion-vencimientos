@@ -46,15 +46,13 @@ class Settings:
     dias_antes_aviso: int
     horas_para_proximo_service: float
     reenviar_aviso: bool
-    smtp_host: str
-    smtp_port: int
-    smtp_user: str
-    smtp_password: str
-    smtp_from_name: str
-    smtp_use_tls: bool
-    mail_admin: str
+    whatsapp_api_url: str
+    whatsapp_token: str
+    whatsapp_phone_number_id: str
+    whatsapp_admin_number: str
     enviar_resumen_admin: bool
     output_dir: Path
+    services_db_path: Path
     log_dir: Path
     enviados_dir: Path
     errores_dir: Path
@@ -74,7 +72,7 @@ def resolve_path(value: str, resource: bool = False) -> Path:
 
 
 def load_settings(force_test: bool = False) -> Settings:
-    load_dotenv(APP_DIR / ".env")
+    load_dotenv(APP_DIR / ".env", override=True)
     modo_prueba = _bool_env("MODO_PRUEBA", True)
     data_source = os.getenv("DATA_SOURCE", "database").strip().lower()
     if force_test:
@@ -86,9 +84,9 @@ def load_settings(force_test: bool = False) -> Settings:
         modo_prueba=modo_prueba,
         data_source=data_source,
         excel_input_path=resolve_path(os.getenv("EXCEL_INPUT_PATH", "data/entrada/servicios_prueba.xlsx")),
-        db_engine=os.getenv("DB_ENGINE", "sqlserver"),
+        db_engine=os.getenv("DB_ENGINE", "mysql"),
         db_host=os.getenv("DB_HOST", ""),
-        db_port=os.getenv("DB_PORT", "1433"),
+        db_port=os.getenv("DB_PORT", "3307"),
         db_name=os.getenv("DB_NAME", ""),
         db_user=os.getenv("DB_USER", ""),
         db_password=os.getenv("DB_PASSWORD", ""),
@@ -97,15 +95,13 @@ def load_settings(force_test: bool = False) -> Settings:
         dias_antes_aviso=int(os.getenv("DIAS_ANTES_AVISO", "7")),
         horas_para_proximo_service=float(os.getenv("HORAS_PARA_PROXIMO_SERVICE", "250")),
         reenviar_aviso=_bool_env("REENVIAR_AVISO", False),
-        smtp_host=os.getenv("SMTP_HOST", "smtp.gmail.com"),
-        smtp_port=int(os.getenv("SMTP_PORT", "587")),
-        smtp_user=os.getenv("SMTP_USER", ""),
-        smtp_password=os.getenv("SMTP_PASSWORD", ""),
-        smtp_from_name=os.getenv("SMTP_FROM_NAME", "Servicio Tecnico"),
-        smtp_use_tls=_bool_env("SMTP_USE_TLS", True),
-        mail_admin=os.getenv("MAIL_ADMIN", ""),
+        whatsapp_api_url=os.getenv("WHATSAPP_API_URL", "https://graph.facebook.com/v20.0"),
+        whatsapp_token=os.getenv("WHATSAPP_TOKEN", ""),
+        whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", ""),
+        whatsapp_admin_number=os.getenv("WHATSAPP_ADMIN_NUMBER", ""),
         enviar_resumen_admin=_bool_env("ENVIAR_RESUMEN_ADMIN", True),
         output_dir=resolve_path(os.getenv("OUTPUT_DIR", "data/reportes")),
+        services_db_path=resolve_path(os.getenv("SERVICES_DB_PATH", "data/services.db")),
         log_dir=resolve_path(os.getenv("LOG_DIR", "data/logs")),
         enviados_dir=resolve_path(os.getenv("ENVIADOS_DIR", "data/enviados")),
         errores_dir=resolve_path(os.getenv("ERRORES_DIR", "data/errores")),
@@ -117,6 +113,7 @@ def ensure_directories(settings: Settings) -> None:
     for path in (
         settings.excel_input_path.parent,
         settings.output_dir,
+        settings.services_db_path.parent,
         settings.log_dir,
         settings.enviados_dir,
         settings.errores_dir,

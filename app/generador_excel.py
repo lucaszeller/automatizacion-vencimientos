@@ -18,6 +18,7 @@ REPORT_COLUMNS = [
     ("Cliente", "cliente"),
     ("Serializado", "serial"),
     ("Lugar", "lugar"),
+    ("Telefono", "telefono_cliente"),
     ("FECHA ANTE ULTIMO SERV.", "fecha_service_anterior"),
     ("Nº SOPORTE", "soporte_anterior"),
     ("HORAS", "horas_anteriores"),
@@ -31,13 +32,21 @@ REPORT_COLUMNS = [
 def generate_report(df: pd.DataFrame, output_dir: Path, run_date: date | None = None, period_label: str | None = None) -> Path:
     run_date = run_date or date.today()
     output_dir.mkdir(parents=True, exist_ok=True)
-    suffix = period_label or run_date.isoformat()
-    output_path = output_dir / f"services_control_{suffix}.xlsx"
-    export = pd.concat([df.get(column) for _, column in REPORT_COLUMNS], axis=1)
+    output_path = output_dir / f"services_control_{run_date.year}.xlsx"
+    export_columns = []
+    for _, column in REPORT_COLUMNS:
+        if column in df.columns:
+            export_columns.append(df[column])
+        else:
+            export_columns.append(pd.Series(index=df.index, dtype="object"))
+    export = pd.concat(export_columns, axis=1)
     export.columns = [title for title, _ in REPORT_COLUMNS]
 
     sheet_name = MONTH_NAMES[run_date.month]
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+    writer_options = {"engine": "openpyxl"}
+    if output_path.exists():
+        writer_options.update({"mode": "a", "if_sheet_exists": "replace"})
+    with pd.ExcelWriter(output_path, **writer_options) as writer:
         export.to_excel(writer, index=False, sheet_name=sheet_name, startrow=2)
         ws = writer.book[sheet_name]
         _style_sheet(ws)
@@ -59,9 +68,12 @@ def _style_sheet(ws) -> None:
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     section_border = Border(left=medium, right=medium, top=medium, bottom=medium)
 
+    current_start, current_end = 1, 8
+    previous_start, previous_end = 9, 13
+    next_col, state_col = 14, 15
     sections = {
-        "SERVICIO ACTUAL": (1, 7, current_fill),
-        "SERVICIO ANTERIOR": (8, 12, previous_fill),
+        "SERVICIO ACTUAL": (current_start, current_end, current_fill),
+        "SERVICIO ANTERIOR": (previous_start, previous_end, previous_fill),
     }
     for title, (start, end, fill) in sections.items():
         cell = ws.cell(row=2, column=start, value=title)
@@ -74,43 +86,43 @@ def _style_sheet(ws) -> None:
             ws.cell(row=2, column=col).border = section_border
             ws.cell(row=2, column=col).alignment = Alignment(horizontal="centerContinuous")
 
-    ws.cell(row=2, column=13, value="PROXIMO SERVICIO")
-    ws.cell(row=2, column=13).font = Font(bold=True, size=14)
-    ws.cell(row=2, column=13).alignment = Alignment(horizontal="center")
-    ws.cell(row=2, column=13).fill = next_fill
-    ws.cell(row=2, column=13).border = section_border
-    ws.cell(row=2, column=14).fill = status_fill
-    ws.cell(row=2, column=14).border = section_border
+    ws.cell(row=2, column=next_col, value="PROXIMO SERVICIO")
+    ws.cell(row=2, column=next_col).font = Font(bold=True, size=14)
+    ws.cell(row=2, column=next_col).alignment = Alignment(horizontal="center")
+    ws.cell(row=2, column=next_col).fill = next_fill
+    ws.cell(row=2, column=next_col).border = section_border
+    ws.cell(row=2, column=state_col).fill = status_fill
+    ws.cell(row=2, column=state_col).border = section_border
 
     for cell in ws[3]:
         cell.font = Font(bold=True, size=11)
-        if 1 <= cell.column <= 7:
+        if current_start <= cell.column <= current_end:
             cell.fill = current_fill
-        elif 8 <= cell.column <= 12:
+        elif previous_start <= cell.column <= previous_end:
             cell.fill = previous_fill
-        elif cell.column == 13:
+        elif cell.column == next_col:
             cell.fill = next_fill
-        elif cell.column == 14:
+        elif cell.column == state_col:
             cell.fill = status_fill
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
         cell.border = border
 
     for row in range(4, ws.max_row + 1):
-        state = ws.cell(row=row, column=14).value
+        state = ws.cell(row=row, column=state_col).value
         for col in range(1, max_col + 1):
             cell = ws.cell(row=row, column=col)
             cell.border = border
-            if 1 <= col <= 7:
+            if current_start <= col <= current_end:
                 cell.fill = current_fill
-            elif 8 <= col <= 12:
+            elif previous_start <= col <= previous_end:
                 cell.fill = previous_fill
-            elif col == 13:
+            elif col == next_col:
                 cell.fill = next_fill
                 cell.font = Font(bold=True, size=12)
-            elif col == 14:
+            elif col == state_col:
                 if state in {"PROXIMO_A_VENCER", "VENCE_HOY", "VENCIDO"}:
                     cell.fill = alert_fill
-                elif state in {"SIN_DATOS", "SIN_MAIL"}:
+                elif state in {"SIN_DATOS", "SIN_MAIL", "SIN_CONTACTO"}:
                     cell.fill = warning_fill
                 elif state == "ERROR_CALCULO":
                     cell.fill = error_fill
@@ -118,11 +130,11 @@ def _style_sheet(ws) -> None:
                     cell.fill = status_fill
 
         if state in {"PROXIMO_A_VENCER", "VENCE_HOY", "VENCIDO"}:
-            ws.cell(row=row, column=14).font = Font(bold=True, color="9C0006")
-        elif state in {"SIN_DATOS", "SIN_MAIL"}:
-            ws.cell(row=row, column=14).font = Font(bold=True, color="7F6000")
+            ws.cell(row=row, column=state_col).font = Font(bold=True, color="9C0006")
+        elif state in {"SIN_DATOS", "SIN_MAIL", "SIN_CONTACTO"}:
+            ws.cell(row=row, column=state_col).font = Font(bold=True, color="7F6000")
         elif state == "ERROR_CALCULO":
-            ws.cell(row=row, column=14).font = Font(bold=True, color="7030A0")
+            ws.cell(row=row, column=state_col).font = Font(bold=True, color="7030A0")
 
     widths = {
         1: 13,
@@ -132,21 +144,22 @@ def _style_sheet(ws) -> None:
         5: 28,
         6: 23,
         7: 8,
-        8: 13,
+        8: 16,
         9: 13,
         10: 13,
         11: 13,
         12: 13,
-        13: 21,
-        14: 18,
+        13: 13,
+        14: 21,
+        15: 18,
     }
     for col in range(1, max_col + 1):
         ws.column_dimensions[get_column_letter(col)].width = widths.get(col, 16)
 
     for row in range(4, ws.max_row + 1):
-        for col in (1, 8, 13):
+        for col in (1, previous_start, next_col):
             ws.cell(row=row, column=col).number_format = "dd/mm/yyyy"
-        ws.cell(row=row, column=12).number_format = "0.00"
+        ws.cell(row=row, column=13).number_format = "0.00"
         ws.row_dimensions[row].height = 34
 
     for row in ws.iter_rows():

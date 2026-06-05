@@ -8,6 +8,7 @@ SELECT
     NULL AS tipo_service,
     NULLIF(i.Campo4, '') AS lugar,
     COALESCE(NULLIF(c.Correo, ''), NULLIF(dc_contacto.Direccion, ''), NULLIF(dc_empresa.Direccion, '')) AS mail_cliente,
+    NULLIF(tf_contacto.Numero, '') AS telefono_cliente,
     CONCAT_WS(' ', s.Problema, s.Solucion, s.Notas) AS observaciones
 FROM soporte s
 LEFT JOIN info i
@@ -20,6 +21,8 @@ LEFT JOIN direccionescorreo dc_contacto
     ON dc_contacto.IDRef = c.IDContacto AND dc_contacto.Defecto = 1
 LEFT JOIN direccionescorreo dc_empresa
     ON dc_empresa.IDRef = s.IDEmpresa AND dc_empresa.Defecto = 1
+LEFT JOIN telefonos tf_contacto
+    ON tf_contacto.IDRef2 = c.IDContacto AND tf_contacto.Defecto = 1
 LEFT JOIN productosstocknroserie ns
     ON ns.RecID = s.IDNroSerie
 WHERE LOWER(COALESCE(s.Problema, '')) REGEXP '(^|[[:space:]-])(servicio|service)[[:space:]]+(preventivo|[0-9])'

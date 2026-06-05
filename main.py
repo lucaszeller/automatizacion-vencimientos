@@ -5,15 +5,28 @@ from datetime import date, timedelta
 import calendar
 import sys
 
-from app.config import ensure_directories, load_settings
-from app.generador_excel import generate_report
-from app.lector_datos import load_source_data
-from app.logger import setup_logger
-from app.mailer_gmail import process_email_alerts, send_admin_summary
-from app.procesador_services import process_services, process_services_for_period
+
+def _count_state(df, state: str) -> int:
+    if "estado" not in df.columns or df.empty:
+        return 0
+    return int((df["estado"] == state).sum())
+
+
+def _count_alerts(df) -> int:
+    if "enviar_aviso" not in df.columns or df.empty:
+        return 0
+    return int(df["enviar_aviso"].sum())
 
 
 def run(force_test: bool = False, only_excel: bool = False, only_mails: bool = False, period: str | None = None) -> int:
+    from app.config import ensure_directories, load_settings
+    from app.generador_excel import generate_report
+    from app.lector_datos import load_source_data
+    from app.logger import setup_logger
+    from app.notifier_whatsapp import process_whatsapp_alerts, send_admin_summary
+    from app.procesador_services import process_services, process_services_for_period
+    from app.service_store import sync_services
+
     settings = load_settings(force_test=force_test)
     ensure_directories(settings)
     logger = setup_logger(settings.log_dir)
@@ -35,28 +48,30 @@ def run(force_test: bool = False, only_excel: bool = False, only_mails: bool = F
     else:
         processed = process_services(raw, settings)
     logger.info("Equipos procesados: %s", len(processed))
-    logger.info("Clientes sin mail: %s", int((processed["estado"] == "SIN_MAIL").sum()))
-    logger.info("Errores de calculo: %s", int((processed["estado"] == "ERROR_CALCULO").sum()))
+    logger.info("Clientes sin contacto WhatsApp: %s", _count_state(processed, "SIN_CONTACTO"))
+    logger.info("Errores de calculo: %s", _count_state(processed, "ERROR_CALCULO"))
 
     if not only_excel:
-        processed, mail_stats = process_email_alerts(processed, settings, logger)
+        processed, mail_stats = process_whatsapp_alerts(processed, settings, logger)
     else:
-        mail_stats = {"avisos_a_enviar": int(processed["enviar_aviso"].sum()), "enviados": 0, "simulados": 0, "errores_smtp": 0}
+        mail_stats = {"avisos_a_enviar": _count_alerts(processed), "enviados": 0, "simulados": 0, "errores_envio": 0}
 
     report_date = period_start or date.today()
     report_path = generate_report(processed, settings.output_dir, run_date=report_date, period_label=period)
+    synced_services = sync_services(processed, settings)
     logger.info("Archivo generado: %s", report_path)
+    logger.info("Services sincronizados en base local: %s", synced_services)
     logger.info("Avisos a enviar: %s", mail_stats.get("avisos_a_enviar", 0))
-    logger.info("Mails enviados correctamente: %s", mail_stats.get("enviados", 0))
-    logger.info("Mails simulados: %s", mail_stats.get("simulados", 0))
-    logger.info("Errores SMTP: %s", mail_stats.get("errores_smtp", 0))
+    logger.info("WhatsApp enviados correctamente: %s", mail_stats.get("enviados", 0))
+    logger.info("WhatsApp simulados: %s", mail_stats.get("simulados", 0))
+    logger.info("Errores de envio WhatsApp: %s", mail_stats.get("errores_envio", 0))
 
     summary = {
         "registros_leidos": len(raw),
         "equipos_procesados": len(processed),
         "avisos_enviados": mail_stats.get("enviados", 0) + mail_stats.get("simulados", 0),
-        "errores": mail_stats.get("errores_smtp", 0) + int((processed["estado"] == "ERROR_CALCULO").sum()),
-        "clientes_sin_mail": int((processed["estado"] == "SIN_MAIL").sum()),
+        "errores": mail_stats.get("errores_envio", 0) + _count_state(processed, "ERROR_CALCULO"),
+        "clientes_sin_mail": _count_state(processed, "SIN_CONTACTO"),
         "archivo_generado": report_path.name,
     }
     if not only_mails:
@@ -71,9 +86,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Alertas mensuales de services")
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--run", action="store_true", help="Ejecuta el proceso completo con la configuracion actual")
-    group.add_argument("--test", action="store_true", help="Ejecuta una prueba con datos simulados y sin mails reales")
-    group.add_argument("--generate-excel", action="store_true", help="Genera Excel sin enviar mails")
-    group.add_argument("--send-mails", action="store_true", help="Procesa avisos y mails segun configuracion")
+    group.add_argument("--test", action="store_true", help="Ejecuta una prueba con datos simulados y sin WhatsApp reales")
+    group.add_argument("--generate-excel", action="store_true", help="Genera Excel sin enviar avisos")
+    group.add_argument("--send-mails", action="store_true", help="Procesa avisos WhatsApp segun configuracion")
     group.add_argument("--ui", action="store_true", help="Abre la interfaz grafica simple")
     parser.add_argument("--period", help="Periodo mensual a generar en formato YYYY-MM, por ejemplo 2026-01")
     return parser.parse_args()

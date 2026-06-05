@@ -9,7 +9,7 @@ from app.config import Settings
 from app.utils import build_aviso_id, clean_text
 
 
-ALERT_STATES = {"PROXIMO_A_VENCER", "VENCE_HOY", "VENCIDO"}
+ALERT_STATES = {"PROXIMO_A_VENCER", "VENCE_HOY"}
 
 
 def process_services(df: pd.DataFrame, settings: Settings, today: date | None = None) -> pd.DataFrame:
@@ -79,6 +79,7 @@ def _base_output(current: pd.Series, previous: pd.Series | None) -> dict:
         "serial": clean_text(current.get("serial")),
         "lugar": clean_text(current.get("lugar")),
         "mail_cliente": clean_text(current.get("mail_cliente")),
+        "telefono_cliente": clean_text(current.get("telefono_cliente")),
         "fecha_service_anterior": previous.get("fecha_service") if previous is not None else None,
         "soporte_anterior": clean_text(previous.get("numero_soporte")) if previous is not None else "",
         "horas_anteriores": previous.get("horas") if previous is not None else None,
@@ -147,8 +148,8 @@ def _process_group(
     row["fecha_estimada_proximo_service"] = next_date
     row["dias_restantes"] = (next_date - today).days
 
-    if not row["mail_cliente"]:
-        row["estado"] = "SIN_MAIL"
+    if not row["telefono_cliente"]:
+        row["estado"] = "SIN_CONTACTO"
     elif next_date < today:
         row["estado"] = "VENCIDO"
     elif next_date == today:
@@ -158,7 +159,7 @@ def _process_group(
     else:
         row["estado"] = "OK"
 
-    row["enviar_aviso"] = row["estado"] in ALERT_STATES and bool(row["mail_cliente"])
+    row["enviar_aviso"] = row["estado"] in ALERT_STATES and bool(row["telefono_cliente"])
     return row
 
 
