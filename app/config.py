@@ -33,6 +33,7 @@ def _bool_env(name: str, default: bool) -> bool:
 class Settings:
     app_env: str
     modo_prueba: bool
+    modo_prueba_explicito: bool  # True si MODO_PRUEBA estaba definido en .env
     data_source: str
     excel_input_path: Path
     db_engine: str
@@ -46,11 +47,18 @@ class Settings:
     dias_antes_aviso: int
     horas_para_proximo_service: float
     reenviar_aviso: bool
+    dias_conservar_reportes_diarios: int
+    whatsapp_provider: str      # "meta" o "local"
+    whatsapp_local_url: str     # URL del servidor local (solo cuando provider=local)
     whatsapp_api_url: str
     whatsapp_token: str
     whatsapp_phone_number_id: str
     whatsapp_admin_number: str
+    whatsapp_test_number: str   # Numero propio para pruebas reales
     enviar_resumen_admin: bool
+    whatsapp_country_prefix: str
+    whatsapp_delay_min: int
+    whatsapp_delay_max: int
     output_dir: Path
     services_db_path: Path
     log_dir: Path
@@ -73,15 +81,24 @@ def resolve_path(value: str, resource: bool = False) -> Path:
 
 def load_settings(force_test: bool = False) -> Settings:
     load_dotenv(APP_DIR / ".env", override=True)
-    modo_prueba = _bool_env("MODO_PRUEBA", True)
+    modo_prueba_raw = os.getenv("MODO_PRUEBA")
+    modo_prueba_explicito = modo_prueba_raw is not None
+    modo_prueba = _bool_env("MODO_PRUEBA", False)
     data_source = os.getenv("DATA_SOURCE", "database").strip().lower()
     if force_test:
         modo_prueba = True
+        modo_prueba_explicito = True
         data_source = "sample"
+
+    delay_min = int(os.getenv("WHATSAPP_DELAY_MIN", "5"))
+    delay_max = int(os.getenv("WHATSAPP_DELAY_MAX", "15"))
+    if delay_min > delay_max:
+        delay_min, delay_max = delay_max, delay_min
 
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),
         modo_prueba=modo_prueba,
+        modo_prueba_explicito=modo_prueba_explicito,
         data_source=data_source,
         excel_input_path=resolve_path(os.getenv("EXCEL_INPUT_PATH", "data/entrada/servicios_prueba.xlsx")),
         db_engine=os.getenv("DB_ENGINE", "mysql"),
@@ -95,11 +112,18 @@ def load_settings(force_test: bool = False) -> Settings:
         dias_antes_aviso=int(os.getenv("DIAS_ANTES_AVISO", "7")),
         horas_para_proximo_service=float(os.getenv("HORAS_PARA_PROXIMO_SERVICE", "250")),
         reenviar_aviso=_bool_env("REENVIAR_AVISO", False),
+        dias_conservar_reportes_diarios=int(os.getenv("DIAS_CONSERVAR_REPORTES_DIARIOS", "30")),
+        whatsapp_provider=os.getenv("WHATSAPP_PROVIDER", "meta").strip().lower(),
+        whatsapp_local_url=os.getenv("WHATSAPP_LOCAL_URL", "http://127.0.0.1:3000"),
         whatsapp_api_url=os.getenv("WHATSAPP_API_URL", "https://graph.facebook.com/v20.0"),
         whatsapp_token=os.getenv("WHATSAPP_TOKEN", ""),
         whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", ""),
         whatsapp_admin_number=os.getenv("WHATSAPP_ADMIN_NUMBER", ""),
+        whatsapp_test_number=os.getenv("WHATSAPP_TEST_NUMBER", ""),
         enviar_resumen_admin=_bool_env("ENVIAR_RESUMEN_ADMIN", True),
+        whatsapp_country_prefix=os.getenv("WHATSAPP_COUNTRY_PREFIX", "54"),
+        whatsapp_delay_min=delay_min,
+        whatsapp_delay_max=delay_max,
         output_dir=resolve_path(os.getenv("OUTPUT_DIR", "data/reportes")),
         services_db_path=resolve_path(os.getenv("SERVICES_DB_PATH", "data/services.db")),
         log_dir=resolve_path(os.getenv("LOG_DIR", "data/logs")),

@@ -2,7 +2,6 @@
 
 import argparse
 from datetime import date, timedelta
-import calendar
 import sys
 
 
@@ -23,7 +22,7 @@ def run(force_test: bool = False, only_excel: bool = False, only_mails: bool = F
     from app.generador_excel import generate_report
     from app.lector_datos import load_source_data
     from app.logger import setup_logger
-    from app.notifier_whatsapp import process_whatsapp_alerts, send_admin_summary
+    from app.notifier_whatsapp import check_whatsapp_config, process_whatsapp_alerts, send_admin_summary
     from app.procesador_services import process_services, process_services_for_period
     from app.service_store import sync_services
 
@@ -35,6 +34,18 @@ def run(force_test: bool = False, only_excel: bool = False, only_mails: bool = F
     logger.info("Inicio del proceso")
     logger.info("Fuente de datos: %s", settings.data_source)
     logger.info("Modo prueba: %s", settings.modo_prueba)
+
+    # Advertir si MODO_PRUEBA no estaba definido explicitamente en .env
+    if not settings.modo_prueba_explicito and not settings.modo_prueba:
+        logger.warning(
+            "MODO_PRUEBA no esta definido en .env — ejecutando en MODO REAL. "
+            "Agrega MODO_PRUEBA=true al .env si queres probar sin enviar mensajes reales."
+        )
+
+    # Health-check de credenciales WhatsApp antes de procesar
+    if not settings.modo_prueba and not only_excel:
+        check_whatsapp_config(settings, logger)
+
     if period_start and period_end:
         logger.info("Periodo del reporte: %s", period)
 
@@ -99,7 +110,6 @@ def parse_period(value: str) -> tuple[date, date]:
         year_text, month_text = value.split("-", 1)
         year = int(year_text)
         month = int(month_text)
-        last_day = calendar.monthrange(year, month)[1]
         start = date(year, month, 1)
         if month == 12:
             end = date(year + 1, 1, 1)

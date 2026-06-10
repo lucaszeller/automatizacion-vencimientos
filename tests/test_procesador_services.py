@@ -4,7 +4,7 @@ import unittest
 import pandas as pd
 
 from app.config import load_settings
-from app.procesador_services import process_services
+from app.procesador_services import process_services, _is_hour_service
 
 
 class ProcesadorServicesTest(unittest.TestCase):
@@ -85,6 +85,20 @@ class ProcesadorServicesTest(unittest.TestCase):
 
         self.assertEqual(result.iloc[0]["estado"], "VENCIDO")
         self.assertFalse(bool(result.iloc[0]["enviar_aviso"]))
+
+
+class IsHourServiceTest(unittest.TestCase):
+    def test_reconoce_formatos_validos(self):
+        self.assertTrue(_is_hour_service("250 Hs"))
+        self.assertTrue(_is_hour_service("1000hs"))
+        self.assertTrue(_is_hour_service("500 HS"))
+        self.assertTrue(_is_hour_service("  250 Hs  "))
+
+    def test_rechaza_falsos_positivos(self):
+        self.assertFalse(_is_hour_service("chassis"))
+        self.assertFalse(_is_hour_service("Reparacion"))
+        self.assertFalse(_is_hour_service(""))
+        self.assertFalse(_is_hour_service("hs sin numero"))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 import math
+import re
 
 import pandas as pd
 
@@ -172,4 +173,7 @@ def _missing_number(value) -> bool:
 
 
 def _is_hour_service(value: str) -> bool:
-    return "hs" in clean_text(value).lower()
+    """Retorna True si el tipo de service indica horas (ej: '250 Hs', '1000hs').
+    Usa regex para evitar falsos positivos con palabras que contengan 'hs' (ej: 'chassis').
+    """
+    return bool(re.search(r"\d+\s*hs", clean_text(value), re.IGNORECASE))
