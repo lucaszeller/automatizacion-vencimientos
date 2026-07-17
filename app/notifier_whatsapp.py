@@ -109,6 +109,11 @@ def process_whatsapp_alerts(df: pd.DataFrame, settings: Settings, logger) -> tup
     for i, (index, row) in enumerate(rows_to_send.iterrows()):
         aviso_id = str(row["id_interno_aviso"])
         destination = normalize_phone(row.get("telefono_cliente"), settings.whatsapp_country_prefix, logger)
+        if not destination or not (12 <= len(destination) <= 13):
+            stats["errores_envio"] += 1
+            updated.at[index, "error_envio"] = f"Telefono invalido: {destination}"
+            logger.warning("Telefono invalido para %s (%s), se omite el envio.", row.get("cliente"), destination)
+            continue
         if aviso_id in sent_ids:
             stats["duplicados"] += 1
             updated.at[index, "mail_enviado"] = True
@@ -126,7 +131,7 @@ def process_whatsapp_alerts(df: pd.DataFrame, settings: Settings, logger) -> tup
                 # Pausa aleatoria antes de cada envio (excepto el primero) para evitar ban
                 if i > 0:
                     dynamic_delay(settings.whatsapp_delay_min, settings.whatsapp_delay_max, logger)
-                _send_client_whatsapp(row, destination, settings, logger)
+                _send_with_retry(row, destination, settings, logger)
                 logger.info("WhatsApp enviado: %s - %s", destination, row["serial"])
                 stats["enviados"] += 1
             updated.at[index, "mail_enviado"] = True
@@ -136,7 +141,7 @@ def process_whatsapp_alerts(df: pd.DataFrame, settings: Settings, logger) -> tup
             error = str(exc)
             stats["errores_envio"] += 1
             updated.at[index, "error_envio"] = error
-            logger.exception("ERROR WHATSAPP: %s - %s", destination, error)
+            logger.error("ERROR WHATSAPP (sin mas reintentos): %s - %s", destination, error)
 
         record_notice(settings, row, result, error)
         records.append(_history_record(row, destination, result, error, aviso_id))
@@ -150,17 +155,34 @@ def process_whatsapp_alerts(df: pd.DataFrame, settings: Settings, logger) -> tup
 def send_admin_summary(settings: Settings, summary: dict, logger) -> None:
     if not settings.enviar_resumen_admin or not settings.whatsapp_admin_number:
         return
-    body = (
-        "Resultado de ejecucion diaria\n\n"
-        f"Registros leidos: {summary.get('registros_leidos', 0)}\n"
-        f"Equipos procesados: {summary.get('equipos_procesados', 0)}\n"
-        f"Avisos enviados/simulados: {summary.get('avisos_enviados', 0)}\n"
-        f"Errores: {summary.get('errores', 0)}\n"
-        f"Clientes sin contacto: {summary.get('clientes_sin_mail', 0)}\n"
-        f"Archivo generado: {summary.get('archivo_generado', '')}\n"
-    )
+
+    a_vencer = summary.get("a_vencer", 0)
+    enviados = summary.get("avisos_enviados", 0)
+    sin_contacto = summary.get("sin_contacto_nombres", [])
+    error_calculo = summary.get("error_calculo_nombres", [])
+
+    lines = [
+        "Resumen de services del dia:",
+        "",
+        f"Services a vencer: {a_vencer}",
+        "",
+        f"Mensajes enviados: {enviados}",
+    ]
+    if sin_contacto:
+        lines.append("")
+        lines.append(f"Sin contacto o mal cargado ({len(sin_contacto)}):")
+        for nombre in sin_contacto:
+            lines.append(f"  - {nombre}")
+    if error_calculo:
+        lines.append("")
+        lines.append(f"Error de calculo - revisar en TacticaSoft ({len(error_calculo)}):")
+        for nombre in error_calculo:
+            lines.append(f"  - {nombre}")
+
+    body = "\n".join(lines)
+
     if settings.modo_prueba:
-        logger.info("Resumen admin simulado para %s", settings.whatsapp_admin_number)
+        logger.info("Resumen admin simulado para %s:\n%s", settings.whatsapp_admin_number, body)
         return
     _send_whatsapp_message(
         normalize_phone(settings.whatsapp_admin_number, settings.whatsapp_country_prefix, logger),
@@ -170,21 +192,39 @@ def send_admin_summary(settings: Settings, summary: dict, logger) -> None:
     logger.info("Resumen admin enviado a %s", settings.whatsapp_admin_number)
 
 
-def build_service_message(row: pd.Series) -> str:
-    model = row.get("equipo", "")
-    serial = row.get("serial", "")
-    hours = row.get("horas_actuales", "")
+def _parse_model_serial(equipo: str) -> tuple[str, str]:
+    """Separa 'HELI CPCD25-Q22K2 (3725)' en modelo='HELI CPCD25-Q22K2' y serie='3725'."""
+    import re
+    m = re.match(r"^(.*?)\s*\((\d+)\)\s*$", str(equipo).strip())
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return str(equipo).strip(), ""
+
+
+def build_service_message(row: pd.Series, operario_whatsapp: str = "") -> str:
+    equipo = row.get("equipo", "")
+    modelo, nro_serie = _parse_model_serial(equipo)
     due_date = row.get("fecha_estimada_proximo_service", "")
-    return (
-        "Hola.\n\n"
-        "Le avisamos que el service del autoelevador esta proximo a vencer.\n\n"
-        f"Modelo/equipo: {model}\n"
-        f"Serial: {serial}\n"
-        f"Horas actuales: {hours}\n"
-        f"Fecha estimada de vencimiento: {due_date}\n\n"
-        "Por favor coordinar disponibilidad para realizar el mantenimiento.\n"
-        "Servicio Tecnico."
-    )
+    if hasattr(due_date, "strftime"):
+        due_date_str = due_date.strftime("%d/%m/%Y")
+    else:
+        due_date_str = str(due_date)
+
+    lines = [
+        "Hola! Nos comunicamos de Porta Autoelevadores para informarle que el proximo service del autoelevador se acerca a su fecha estimada de vencimiento.",
+        "",
+    ]
+    if modelo:
+        lines.append(f"Modelo: {modelo}")
+    if nro_serie:
+        lines.append(f"N de serie: {nro_serie}")
+    lines.append(f"Proximo service: {due_date_str}")
+    lines.append("")
+    lines.append("Para coordinar un turno comuniquese al numero: 3564221129 - Luis")
+    lines.append("")
+    lines.append("Saludos")
+    lines.append("Servicio Tecnico Porta")
+    return "\n".join(lines)
 
 def send_whatsapp_text(destination: str, body: str, settings: Settings, logger=None) -> None:
     _send_whatsapp_message(normalize_phone(destination, settings.whatsapp_country_prefix, logger), body, settings)
@@ -201,9 +241,9 @@ def normalize_phone(value, country_prefix: str = "54", logger=None) -> str:
         digits = prefix + digits
         if logger:
             logger.warning("Telefono sin codigo de pais, se agrego prefijo %s: %s -> %s", prefix, raw, digits)
-    if len(digits) < 10:
+    if len(digits) < 12 or len(digits) > 13:
         if logger:
-            logger.warning("Telefono posiblemente invalido (muy corto): %s", digits)
+            logger.warning("Telefono invalido (se esperan 12-13 digitos, tiene %d): %s", len(digits), digits)
     return digits
 
 
@@ -235,8 +275,42 @@ def _history_record(row: pd.Series, destination: str, result: str, error: str, a
     }
 
 
+def _send_with_retry(row: pd.Series, destination: str, settings: Settings, logger=None) -> None:
+    """Envia un mensaje con reintentos automaticos en caso de fallo.
+
+    Intenta hasta (max_retries + 1) veces en total.
+    Entre reintentos espera 15 segundos (fijo, independiente del delay anti-ban entre clientes).
+    Si todos los intentos fallan, relanza la ultima excepcion.
+    """
+    _RETRY_WAIT = 15  # segundos entre reintentos
+    max_retries = getattr(settings, "whatsapp_max_retries", 2)
+    last_exc = None
+    for attempt in range(1, max_retries + 2):  # intento 1, 2, ..., max_retries+1
+        try:
+            _send_client_whatsapp(row, destination, settings, logger)
+            if attempt > 1 and logger:
+                logger.info("Reintento %d exitoso para %s", attempt - 1, destination)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt <= max_retries:
+                if logger:
+                    logger.warning(
+                        "Error en intento %d/%d para %s: %s — reintentando en %ds...",
+                        attempt, max_retries + 1, destination, exc, _RETRY_WAIT,
+                    )
+                time.sleep(_RETRY_WAIT)
+            else:
+                if logger:
+                    logger.warning(
+                        "Error en intento %d/%d para %s: %s — sin mas reintentos.",
+                        attempt, max_retries + 1, destination, exc,
+                    )
+    raise last_exc
+
+
 def _send_client_whatsapp(row: pd.Series, destination: str, settings: Settings, logger=None) -> None:
-    body = build_service_message(row)
+    body = build_service_message(row, operario_whatsapp=settings.operario_whatsapp)
     _send_whatsapp_message(normalize_phone(destination, settings.whatsapp_country_prefix, logger), body, settings)
 
 

@@ -37,5 +37,9 @@ echo.
 echo Para detener el servidor: Ctrl+C
 echo.
 
+:loop
 node server.js
-pause
+echo.
+echo El servidor se detuvo. Reiniciando en 3 segundos... (Ctrl+C para salir)
+timeout /t 3 /nobreak >nul
+goto loop

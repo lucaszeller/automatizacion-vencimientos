@@ -77,7 +77,22 @@ def normalize_service_data(df: pd.DataFrame) -> pd.DataFrame:
     normalized["tipo_service"] = normalized.apply(_complete_tipo_service, axis=1)
     normalized["fecha_service"] = normalized["fecha_service"].map(to_date)
     normalized["horas"] = normalized["horas"].map(to_number)
-    return normalized.dropna(subset=["fecha_service"])
+    normalized = normalized.dropna(subset=["fecha_service"])
+
+    # Deduplicar por numero_soporte: si el mismo soporte tiene varias filas (por multiples
+    # telefonos en TacticaSoft), quedarse con la que tenga telefono valido; si no, la primera.
+    if "numero_soporte" in normalized.columns:
+        has_phone = normalized["telefono_cliente"].str.strip().ne("").fillna(False)
+        normalized["_has_phone"] = has_phone
+        normalized = (
+            normalized
+            .sort_values("_has_phone", ascending=False)
+            .drop_duplicates(subset=["numero_soporte"], keep="first")
+            .drop(columns=["_has_phone"])
+            .reset_index(drop=True)
+        )
+
+    return normalized
 
 
 def _complete_tipo_service(row: pd.Series) -> str:
@@ -85,12 +100,32 @@ def _complete_tipo_service(row: pd.Series) -> str:
     if current:
         return current
     text = clean_text(row.get("observaciones"))
-    if re.search(r"servi(cio|ce)\s+preventivo\s+semestral", text, flags=re.IGNORECASE):
+    # lecturas iniciales de horimetro (pre entrega, consulta de hs)
+    if re.search(r"chequeo\s+pre\s+entrega", text, flags=re.IGNORECASE):
+        return "entrega"
+    if re.search(r"consulta\s+de\s+hs", text, flags=re.IGNORECASE):
+        return "consulta"
+    # semestral: "servicio semestral", "servicio de semestral", "servicio preventivo semestral", etc.
+    if re.search(r"servi(?:cio|ce)\s+(?:de\s+)?(?:mantenimiento\s+)?(?:preventivo\s+)?semestral", text, flags=re.IGNORECASE):
         return "semestral"
+    # trimestral: "servicio trimestral", "service trimestral", etc.
+    if re.search(r"servi(?:cio|ce)\s+(?:de\s+)?(?:mantenimiento\s+)?(?:preventivo\s+)?trimestral", text, flags=re.IGNORECASE):
+        return "trimestral"
+    # km
     match = re.search(r"servi(?:cio|ce)\s+([0-9][0-9.\s]*)\s*_?\s*km", text, flags=re.IGNORECASE)
     if match:
         return f"{match.group(1).strip()} Km"
-    match = re.search(r"servicio\s+([0-9]{2,5})\s*_?\s*h(?:s)?\b", text, flags=re.IGNORECASE)
+    # patron general para extraer NNN Hs de cualquier contexto de service/preventivo
+    # cubre: "servicio", "service", "servicios", "sevicio" (sin r), "servico" (sin i)
+    _hs_pattern = r"([0-9]{2,5})\s*_?\s*h(?:s)?\b"
+    # servi(ci?o|ce) cubre: "servicio", "servico" (sin 2da i), "service"
+    # sevi(ci?o|ce)  cubre: "sevicio" (sin r), "sevice"
+    _svc = r"(?:servi|sevi)(?:ci?o|ce)s?"
+    match = (
+        re.search(_svc + r"\s+(?:de\s+)?(?:mantenimiento\s+)?(?:preventivo\s+)?(?:de\s+)?" + _hs_pattern, text, flags=re.IGNORECASE)
+        or re.search(r"preventivo\s+(?:de\s+)?" + _hs_pattern, text, flags=re.IGNORECASE)
+        or re.search(r"mantenimiento\s+(?:de\s+)?preventivo\s+(?:de\s+)?" + _hs_pattern, text, flags=re.IGNORECASE)
+    )
     if not match:
         return ""
     return f"{match.group(1)} Hs"

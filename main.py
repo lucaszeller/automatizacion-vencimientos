@@ -77,15 +77,45 @@ def run(force_test: bool = False, only_excel: bool = False, only_mails: bool = F
     logger.info("WhatsApp simulados: %s", mail_stats.get("simulados", 0))
     logger.info("Errores de envio WhatsApp: %s", mail_stats.get("errores_envio", 0))
 
+    # Clientes sin contacto válido: SIN_CONTACTO + teléfono inválido (menos de 12 dígitos con prefijo)
+    from app.notifier_whatsapp import normalize_phone
+    sin_contacto_rows = processed[processed["estado"].isin(["PROXIMO_A_VENCER", "VENCE_HOY", "SIN_CONTACTO"])].copy() if not processed.empty else processed
+    sin_contacto_nombres = []
+    if not sin_contacto_rows.empty and "telefono_cliente" in sin_contacto_rows.columns:
+        for _, r in sin_contacto_rows.iterrows():
+            tel = normalize_phone(r.get("telefono_cliente"), settings.whatsapp_country_prefix)
+            if not tel or len(tel) < 12:
+                nombre = r.get("cliente", "")
+                if not tel:
+                    label = f"{nombre}: sin numero cargado"
+                else:
+                    label = f"{nombre}: numero invalido (+{tel})"
+                sin_contacto_nombres.append(label)
+
+    # Equipos con error de calculo (datos inconsistentes en TacticaSoft)
+    error_calculo_rows = processed[processed["estado"] == "ERROR_CALCULO"].copy() if not processed.empty else processed
+    error_calculo_nombres = []
+    if not error_calculo_rows.empty:
+        for _, r in error_calculo_rows.iterrows():
+            motivo = r.get("error_calculo_motivo", "")
+            label = r.get("cliente", "")
+            if motivo:
+                label = f"{label}: {motivo}"
+            error_calculo_nombres.append(label)
+        error_calculo_nombres = sorted(set(error_calculo_nombres))
+
     summary = {
         "registros_leidos": len(raw),
         "equipos_procesados": len(processed),
+        "a_vencer": _count_state(processed, "PROXIMO_A_VENCER") + _count_state(processed, "VENCE_HOY"),
         "avisos_enviados": mail_stats.get("enviados", 0) + mail_stats.get("simulados", 0),
         "errores": mail_stats.get("errores_envio", 0) + _count_state(processed, "ERROR_CALCULO"),
         "clientes_sin_mail": _count_state(processed, "SIN_CONTACTO"),
+        "sin_contacto_nombres": sorted(set(sin_contacto_nombres)),
+        "error_calculo_nombres": error_calculo_nombres,
         "archivo_generado": report_path.name,
     }
-    if not only_mails:
+    if not only_mails and not only_excel:
         send_admin_summary(settings, summary, logger)
 
     logger.info("Fin del proceso")

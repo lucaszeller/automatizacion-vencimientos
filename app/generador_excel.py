@@ -55,120 +55,134 @@ def generate_report(df: pd.DataFrame, output_dir: Path, run_date: date | None = 
 
 def _style_sheet(ws) -> None:
     max_col = ws.max_column
-    current_fill = PatternFill("solid", fgColor="C6E0B4")
+    max_row = ws.max_row
+
+    # ── Estilos definidos una sola vez ────────────────────────────────────────
+    current_fill  = PatternFill("solid", fgColor="C6E0B4")
     previous_fill = PatternFill("solid", fgColor="F8CBAD")
-    next_fill = PatternFill("solid", fgColor="70AD47")
-    status_fill = PatternFill("solid", fgColor="A9D18E")
-    alert_fill = PatternFill("solid", fgColor="F4CCCC")
-    warning_fill = PatternFill("solid", fgColor="FFF2CC")
-    missing_fill = PatternFill("solid", fgColor="D9EAF7")
-    error_fill = PatternFill("solid", fgColor="EADCF8")
-    thin = Side(style="thin", color="000000")
+    next_fill     = PatternFill("solid", fgColor="70AD47")
+    status_fill   = PatternFill("solid", fgColor="A9D18E")
+    alert_fill    = PatternFill("solid", fgColor="F4CCCC")
+    warning_fill  = PatternFill("solid", fgColor="FFF2CC")
+    error_fill    = PatternFill("solid", fgColor="EADCF8")
+    no_fill       = PatternFill()
+
+    thin   = Side(style="thin",   color="000000")
     medium = Side(style="medium", color="7F7F7F")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    border         = Border(left=thin,   right=thin,   top=thin,   bottom=thin)
     section_border = Border(left=medium, right=medium, top=medium, bottom=medium)
 
-    current_start, current_end = 1, 8
+    font_header  = Font(bold=True, size=14)
+    font_col_hdr = Font(bold=True, size=11)
+    font_next    = Font(bold=True, size=12)
+    font_alert   = Font(bold=True, color="9C0006")
+    font_warning = Font(bold=True, color="7F6000")
+    font_error   = Font(bold=True, color="7030A0")
+
+    align_center_cont = Alignment(horizontal="centerContinuous", vertical="center")
+    align_center      = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    align_top         = Alignment(vertical="top", wrap_text=True)
+
+    current_start, current_end   = 1, 8
     previous_start, previous_end = 9, 13
-    next_col, state_col = 14, 15
+    next_col, state_col          = 14, 15
+
+    # Fill por columna (para filas de datos y cabecera)
+    col_fills: dict[int, PatternFill] = {}
+    for c in range(current_start,  current_end  + 1): col_fills[c] = current_fill
+    for c in range(previous_start, previous_end + 1): col_fills[c] = previous_fill
+    col_fills[next_col]  = next_fill
+    col_fills[state_col] = status_fill
+
+    # Fill y font del estado (en columna 15)
+    _state_fill = {
+        "PROXIMO_A_VENCER": alert_fill,   "VENCE_HOY": alert_fill,
+        "VENCIDO":          alert_fill,   "SIN_DATOS": warning_fill,
+        "SIN_MAIL":         warning_fill, "SIN_CONTACTO": warning_fill,
+        "ERROR_CALCULO":    error_fill,
+    }
+    _state_font = {
+        "PROXIMO_A_VENCER": font_alert,  "VENCE_HOY": font_alert,
+        "VENCIDO":          font_alert,  "SIN_DATOS": font_warning,
+        "SIN_MAIL":         font_warning,"SIN_CONTACTO": font_warning,
+        "ERROR_CALCULO":    font_error,
+    }
+
+    DATE_COLS  = {1, previous_start, next_col}
+    RATIO_COLS = {13}
+
+    # ── Fila 1: solo borde ───────────────────────────────────────────────────
+    for col in range(1, max_col + 1):
+        ws.cell(row=1, column=col).border = border
+
+    # ── Fila 2: encabezados de sección ───────────────────────────────────────
     sections = {
-        "SERVICIO ACTUAL": (current_start, current_end, current_fill),
+        "SERVICIO ACTUAL":   (current_start,  current_end,  current_fill),
         "SERVICIO ANTERIOR": (previous_start, previous_end, previous_fill),
     }
     for title, (start, end, fill) in sections.items():
-        cell = ws.cell(row=2, column=start, value=title)
-        cell.font = Font(bold=True, size=14)
-        cell.alignment = Alignment(horizontal="centerContinuous")
-        cell.fill = fill
-        cell.border = section_border
         for col in range(start, end + 1):
-            ws.cell(row=2, column=col).fill = fill
-            ws.cell(row=2, column=col).border = section_border
-            ws.cell(row=2, column=col).alignment = Alignment(horizontal="centerContinuous")
+            cell = ws.cell(row=2, column=col)
+            cell.fill      = fill
+            cell.border    = section_border
+            cell.alignment = align_center_cont
+        ws.cell(row=2, column=start).value = title
+        ws.cell(row=2, column=start).font  = font_header
 
-    ws.cell(row=2, column=next_col, value="PROXIMO SERVICIO")
-    ws.cell(row=2, column=next_col).font = Font(bold=True, size=14)
-    ws.cell(row=2, column=next_col).alignment = Alignment(horizontal="center")
-    ws.cell(row=2, column=next_col).fill = next_fill
-    ws.cell(row=2, column=next_col).border = section_border
-    ws.cell(row=2, column=state_col).fill = status_fill
-    ws.cell(row=2, column=state_col).border = section_border
+    for col, value, fill in [
+        (next_col,  "PROXIMO SERVICIO", next_fill),
+        (state_col, None,               status_fill),
+    ]:
+        cell = ws.cell(row=2, column=col)
+        if value:
+            cell.value = value
+            cell.font  = font_header
+        cell.fill      = fill
+        cell.border    = section_border
+        cell.alignment = align_center
+    ws.row_dimensions[2].height = 28
 
+    # ── Fila 3: cabecera de columnas ──────────────────────────────────────────
     for cell in ws[3]:
-        cell.font = Font(bold=True, size=11)
-        if current_start <= cell.column <= current_end:
-            cell.fill = current_fill
-        elif previous_start <= cell.column <= previous_end:
-            cell.fill = previous_fill
-        elif cell.column == next_col:
-            cell.fill = next_fill
-        elif cell.column == state_col:
-            cell.fill = status_fill
-        cell.alignment = Alignment(horizontal="center", wrap_text=True)
-        cell.border = border
+        cell.font      = font_col_hdr
+        cell.fill      = col_fills.get(cell.column, no_fill)
+        cell.border    = border
+        cell.alignment = align_center
+    ws.row_dimensions[3].height = 28
 
-    for row in range(4, ws.max_row + 1):
+    # ── Filas de datos: UNA SOLA PASADA ──────────────────────────────────────
+    for row in range(4, max_row + 1):
         state = ws.cell(row=row, column=state_col).value
+        ws.row_dimensions[row].height = 34
+
         for col in range(1, max_col + 1):
             cell = ws.cell(row=row, column=col)
-            cell.border = border
-            if current_start <= col <= current_end:
-                cell.fill = current_fill
-            elif previous_start <= col <= previous_end:
-                cell.fill = previous_fill
+            cell.border    = border
+            cell.alignment = align_top
+
+            # Fill
+            if col == state_col:
+                cell.fill = _state_fill.get(state, status_fill)
+            else:
+                cell.fill = col_fills.get(col, no_fill)
+
+            # Font
+            if col == state_col and state in _state_font:
+                cell.font = _state_font[state]
             elif col == next_col:
-                cell.fill = next_fill
-                cell.font = Font(bold=True, size=12)
-            elif col == state_col:
-                if state in {"PROXIMO_A_VENCER", "VENCE_HOY", "VENCIDO"}:
-                    cell.fill = alert_fill
-                elif state in {"SIN_DATOS", "SIN_MAIL", "SIN_CONTACTO"}:
-                    cell.fill = warning_fill
-                elif state == "ERROR_CALCULO":
-                    cell.fill = error_fill
-                else:
-                    cell.fill = status_fill
+                cell.font = font_next
 
-        if state in {"PROXIMO_A_VENCER", "VENCE_HOY", "VENCIDO"}:
-            ws.cell(row=row, column=state_col).font = Font(bold=True, color="9C0006")
-        elif state in {"SIN_DATOS", "SIN_MAIL", "SIN_CONTACTO"}:
-            ws.cell(row=row, column=state_col).font = Font(bold=True, color="7F6000")
-        elif state == "ERROR_CALCULO":
-            ws.cell(row=row, column=state_col).font = Font(bold=True, color="7030A0")
+            # Formato numérico
+            if col in DATE_COLS:
+                cell.number_format = "dd/mm/yyyy"
+            elif col in RATIO_COLS:
+                cell.number_format = "0.00"
 
-    widths = {
-        1: 13,
-        2: 9.5,
-        3: 7,
-        4: 12,
-        5: 28,
-        6: 23,
-        7: 8,
-        8: 16,
-        9: 13,
-        10: 13,
-        11: 13,
-        12: 13,
-        13: 13,
-        14: 21,
-        15: 18,
-    }
+    # ── Anchos de columna ─────────────────────────────────────────────────────
+    widths = {1:13, 2:9.5, 3:7, 4:12, 5:28, 6:23, 7:8, 8:16,
+              9:13, 10:13, 11:13, 12:13, 13:13, 14:21, 15:18}
     for col in range(1, max_col + 1):
         ws.column_dimensions[get_column_letter(col)].width = widths.get(col, 16)
 
-    for row in range(4, ws.max_row + 1):
-        for col in (1, previous_start, next_col):
-            ws.cell(row=row, column=col).number_format = "dd/mm/yyyy"
-        ws.cell(row=row, column=13).number_format = "0.00"
-        ws.row_dimensions[row].height = 34
-
-    for row in ws.iter_rows():
-        for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-    for row in (2, 3):
-        ws.row_dimensions[row].height = 28
-    for row in range(1, ws.max_row + 1):
-        for col in range(1, max_col + 1):
-            ws.cell(row=row, column=col).border = border
-    ws.auto_filter.ref = f"A3:{get_column_letter(max_col)}{ws.max_row}"
-    ws.freeze_panes = None
+    ws.auto_filter.ref = f"A3:{get_column_letter(max_col)}{max_row}"
+    ws.freeze_panes   = None

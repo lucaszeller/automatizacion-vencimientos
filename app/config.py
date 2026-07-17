@@ -46,6 +46,8 @@ class Settings:
     db_query_path: Path
     dias_antes_aviso: int
     horas_para_proximo_service: float
+    dias_service_semestral: int
+    dias_service_trimestral: int
     reenviar_aviso: bool
     dias_conservar_reportes_diarios: int
     whatsapp_provider: str      # "meta" o "local"
@@ -59,6 +61,8 @@ class Settings:
     whatsapp_country_prefix: str
     whatsapp_delay_min: int
     whatsapp_delay_max: int
+    whatsapp_max_retries: int  # Reintentos si un envio falla (0 = sin reintentos)
+    operario_whatsapp: str  # Numero del operario que coordina los services (para incluir en el mensaje)
     output_dir: Path
     services_db_path: Path
     log_dir: Path
@@ -111,6 +115,8 @@ def load_settings(force_test: bool = False) -> Settings:
         db_query_path=resolve_path(os.getenv("DB_QUERY_PATH", "sql/tacticasoft_services.sql"), resource=True),
         dias_antes_aviso=int(os.getenv("DIAS_ANTES_AVISO", "7")),
         horas_para_proximo_service=float(os.getenv("HORAS_PARA_PROXIMO_SERVICE", "250")),
+        dias_service_semestral=int(os.getenv("DIAS_SERVICE_SEMESTRAL", "180")),
+        dias_service_trimestral=int(os.getenv("DIAS_SERVICE_TRIMESTRAL", "90")),
         reenviar_aviso=_bool_env("REENVIAR_AVISO", False),
         dias_conservar_reportes_diarios=int(os.getenv("DIAS_CONSERVAR_REPORTES_DIARIOS", "30")),
         whatsapp_provider=os.getenv("WHATSAPP_PROVIDER", "meta").strip().lower(),
@@ -124,6 +130,8 @@ def load_settings(force_test: bool = False) -> Settings:
         whatsapp_country_prefix=os.getenv("WHATSAPP_COUNTRY_PREFIX", "54"),
         whatsapp_delay_min=delay_min,
         whatsapp_delay_max=delay_max,
+        whatsapp_max_retries=int(os.getenv("WHATSAPP_MAX_RETRIES", "2")),
+        operario_whatsapp=os.getenv("OPERARIO_WHATSAPP", ""),
         output_dir=resolve_path(os.getenv("OUTPUT_DIR", "data/reportes")),
         services_db_path=resolve_path(os.getenv("SERVICES_DB_PATH", "data/services.db")),
         log_dir=resolve_path(os.getenv("LOG_DIR", "data/logs")),
