@@ -188,6 +188,68 @@ def get_pending_alerts(settings: Settings, today: date | None = None) -> pd.Data
     return result
 
 
+def record_seguimiento(
+    settings: Settings,
+    aviso_id: str,
+    cliente: str,
+    serial: str,
+    equipo: str,
+    fecha_estimada: str,
+    telefono: str,
+) -> int:
+    """Registra un envio manual para seguimiento. Retorna el id generado."""
+    init_store(settings)
+    now = datetime.now().isoformat(timespec="seconds")
+    with sqlite3.connect(settings.services_db_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO seguimiento (aviso_id, cliente, serial, equipo, fecha_estimada, telefono, fecha_envio, estado)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')
+            """,
+            (
+                clean_text(aviso_id), clean_text(cliente), clean_text(serial),
+                clean_text(equipo), clean_text(fecha_estimada), clean_text(telefono), now,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def update_seguimiento_estado(settings: Settings, seguimiento_id: int, estado: str) -> None:
+    """Actualiza el estado de un registro de seguimiento (coordinado / sin_respuesta)."""
+    init_store(settings)
+    now = datetime.now().isoformat(timespec="seconds")
+    with sqlite3.connect(settings.services_db_path) as connection:
+        connection.execute(
+            "UPDATE seguimiento SET estado = ?, fecha_respuesta = ? WHERE id = ?",
+            (estado, now, seguimiento_id),
+        )
+
+
+def list_seguimiento(settings: Settings) -> pd.DataFrame:
+    """Lista todos los registros de seguimiento, mas recientes primero."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        return pd.read_sql_query(
+            """
+            SELECT id, aviso_id, cliente, serial, equipo, fecha_estimada,
+                   telefono, fecha_envio, estado, fecha_respuesta
+            FROM seguimiento
+            ORDER BY fecha_envio DESC
+            """,
+            connection,
+        )
+
+
+def get_seguimiento_aviso_ids(settings: Settings) -> set[str]:
+    """Retorna aviso_ids que ya tienen mensaje enviado manualmente (para filtrarlos de Proximos/Vencidos)."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        rows = connection.execute(
+            "SELECT DISTINCT aviso_id FROM seguimiento"
+        ).fetchall()
+    return {row[0] for row in rows if row[0]}
+
+
 def record_notice(settings: Settings, row: pd.Series, resultado: str, error: str = "") -> None:
     init_store(settings)
     with sqlite3.connect(settings.services_db_path) as connection:
@@ -256,6 +318,22 @@ def init_store(settings: Settings) -> None:
                 contact_key TEXT PRIMARY KEY,
                 telefono_cliente TEXT,
                 updated_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seguimiento (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                aviso_id TEXT NOT NULL,
+                cliente TEXT,
+                serial TEXT,
+                equipo TEXT,
+                fecha_estimada TEXT,
+                telefono TEXT,
+                fecha_envio TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'pendiente',
+                fecha_respuesta TEXT
             )
             """
         )

@@ -14,7 +14,14 @@ from tkinter import messagebox, scrolledtext, ttk
 import pandas as pd
 
 from app.config import load_settings
-from app.service_store import list_service_contacts, update_service_phone
+from app.service_store import (
+    list_service_contacts,
+    update_service_phone,
+    record_seguimiento,
+    update_seguimiento_estado,
+    list_seguimiento,
+    get_seguimiento_aviso_ids,
+)
 
 # ── Paleta de colores ──────────────────────────────────────────────────────────
 C_PRIMARY      = "#1565C0"   # azul principal
@@ -110,6 +117,17 @@ def _apply_styles(root: tk.Tk) -> None:
     )
     style.map("Neutral.TButton",
               background=[("active", C_NEUTRAL_DK), ("disabled", "#B0BEC5")],
+              foreground=[("disabled", "#ECEFF1")])
+
+    # Botones — danger (rojo)
+    style.configure(
+        "Danger.TButton",
+        background="#C62828", foreground="white",
+        font=(FONT_FAMILY, 10, "bold"),
+        relief="flat", borderwidth=0, padding=(10, 6),
+    )
+    style.map("Danger.TButton",
+              background=[("active", "#B71C1C"), ("disabled", "#B0BEC5")],
               foreground=[("disabled", "#ECEFF1")])
 
     # Botones — outline (borde, fondo blanco)
@@ -875,22 +893,21 @@ class ServicesReviewWindow:
             self.window.after(0, lambda: self._status_var.set("Procesando equipos..."))
             df = process_services(raw, self.settings)
 
+            # Ids ya enviados manualmente → filtrar de proximos/vencidos
+            seg_ids = get_seguimiento_aviso_ids(self.settings)
+
             if not df.empty and "dias_restantes" in df.columns:
                 dias = pd.to_numeric(df["dias_restantes"], errors="coerce")
                 proximos = df[dias.between(0, 7)].copy().sort_values("dias_restantes")
                 vencidos = df[dias < 0].copy().sort_values("dias_restantes")
+                if seg_ids:
+                    proximos = proximos[~proximos["id_interno_aviso"].astype(str).isin(seg_ids)]
+                    vencidos = vencidos[~vencidos["id_interno_aviso"].astype(str).isin(seg_ids)]
             else:
                 proximos = vencidos = pd.DataFrame()
 
-            # Historial de enviados
-            enviados_path = self.settings.enviados_dir / f"whatsapp_enviados_{date.today().year}.xlsx"
-            if enviados_path.exists():
-                self._enviados = pd.read_excel(enviados_path)
-                # Ordenar por fecha descendente (más recientes primero)
-                if "Fecha ejecucion" in self._enviados.columns:
-                    self._enviados = self._enviados.sort_values("Fecha ejecucion", ascending=False)
-            else:
-                self._enviados = pd.DataFrame()
+            # Seguimiento de enviados manuales
+            self._enviados = list_seguimiento(self.settings)
 
             self._proximos = proximos
             self._vencidos = vencidos
@@ -1024,26 +1041,11 @@ class ServicesReviewWindow:
         if not new_number:
             messagebox.showwarning("Sin número", "Ingresá un número antes de guardar.", parent=self.window)
             return
-        # Guardar en BD local
         try:
             update_service_phone(self.settings, aviso_id, new_number)
-        except Exception as exc:
-            messagebox.showerror("Error al guardar en BD local", str(exc), parent=self.window)
-            return
-
-        # Intentar guardar también en TacticaSoft
-        tactica_msg = ""
-        if id_empresa:
-            try:
-                from app.tactica_write import upsert_service_contact_phone
-                tactica_msg = upsert_service_contact_phone(self.settings, int(id_empresa), new_number)
-            except Exception as exc:
-                tactica_msg = f"(No se pudo guardar en TacticaSoft: {exc})"
-
-        if tactica_msg:
-            messagebox.showinfo("Guardado", f"BD local: ✓\n{tactica_msg}", parent=self.window)
-        else:
             messagebox.showinfo("Guardado", "Teléfono guardado en la base local.", parent=self.window)
+        except Exception as exc:
+            messagebox.showerror("Error", str(exc), parent=self.window)
 
     def _enviar(self, row: pd.Series, tel: str, tel_ok: bool) -> None:
         if not tel_ok:
@@ -1067,8 +1069,20 @@ class ServicesReviewWindow:
                 from app.notifier_whatsapp import build_service_message, send_whatsapp_text
                 msg = build_service_message(row, operario_whatsapp=self.settings.operario_whatsapp)
                 send_whatsapp_text(tel, msg, self.settings)
+                # Registrar en seguimiento
+                aviso_id  = str(row.get("id_interno_aviso", "") or "")
+                fecha     = row.get("fecha_estimada_proximo_service", "")
+                fecha_str = fecha.strftime("%Y-%m-%d") if hasattr(fecha, "strftime") else str(fecha or "")
+                record_seguimiento(
+                    self.settings, aviso_id,
+                    str(row.get("cliente", "")),
+                    str(row.get("serial", "")),
+                    str(row.get("equipo", "")),
+                    fecha_str, tel,
+                )
+                self.window.after(0, self._refresh)
                 self.window.after(0, lambda: messagebox.showinfo(
-                    "Enviado", f"Mensaje enviado correctamente a +{tel}.", parent=self.window))
+                    "Enviado", f"Mensaje enviado a +{tel}.\nLa fila pasó a la pestaña Enviados.", parent=self.window))
             except Exception as exc:
                 self.window.after(0, lambda: messagebox.showerror("Error al enviar", str(exc), parent=self.window))
 
@@ -1079,13 +1093,13 @@ class ServicesReviewWindow:
             w.destroy()
 
         if df.empty:
-            ttk.Label(parent, text="Sin enviados registrados este año.", style="Muted.TLabel").pack(pady=30)
+            ttk.Label(parent, text="Sin mensajes enviados manualmente.", style="Muted.TLabel").pack(pady=30)
             return
 
         # Cabecera
         hdr = tk.Frame(parent, bg="#ECEFF1")
         hdr.pack(fill=tk.X, padx=2, pady=(2, 0))
-        for text, w in [("Fecha envío", 18), ("Cliente", 26), ("Equipo", 20), ("Teléfono", 16), ("Próximo service", 15), ("Resultado", 10)]:
+        for text, w in [("Fecha envío", 17), ("Cliente", 26), ("Serial", 16), ("Teléfono", 14), ("Próximo service", 14), ("", 16)]:
             tk.Label(hdr, text=text, bg="#ECEFF1", fg=C_NEUTRAL,
                      font=(FONT_FAMILY, 9, "bold"), width=w, anchor="w").pack(side=tk.LEFT, padx=4, pady=5)
 
@@ -1108,31 +1122,72 @@ class ServicesReviewWindow:
         canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_scroll))
         canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-        for i, (_, row) in enumerate(df.iterrows()):
-            bg = C_CARD if i % 2 == 0 else "#F5F7FA"
-            resultado = str(row.get("Resultado", ""))
-            fg_res = C_SUCCESS if resultado == "ENVIADO" else (C_WARNING if resultado == "SIMULADO" else "#C62828")
+        # Colores por estado
+        _BG_ESTADO = {
+            "coordinado":    "#E8F5E9",
+            "sin_respuesta": "#FFEBEE",
+        }
+        _FG_ESTADO = {
+            "pendiente":     C_TEXT_MUTED,
+            "coordinado":    C_SUCCESS,
+            "sin_respuesta": "#C62828",
+        }
+        _LABEL_ESTADO = {
+            "pendiente":     "Pendiente",
+            "coordinado":    "✓ Coordinado",
+            "sin_respuesta": "✗ Sin respuesta",
+        }
 
-            fecha_env = row.get("Fecha ejecucion", "")
-            if hasattr(fecha_env, "strftime"):
-                fecha_env_str = fecha_env.strftime("%d/%m/%Y %H:%M")
-            else:
+        for i, (_, row) in enumerate(df.iterrows()):
+            estado = str(row.get("estado", "pendiente"))
+            bg = _BG_ESTADO.get(estado, C_CARD if i % 2 == 0 else "#F5F7FA")
+
+            seg_id = int(row.get("id", 0))
+
+            fecha_env = row.get("fecha_envio", "")
+            try:
+                fecha_env_str = pd.to_datetime(fecha_env).strftime("%d/%m/%Y %H:%M")
+            except Exception:
                 fecha_env_str = str(fecha_env or "")
 
-            fecha_prox = row.get("Fecha proximo service", "")
-            if hasattr(fecha_prox, "strftime"):
-                fecha_prox_str = fecha_prox.strftime("%d/%m/%Y")
-            else:
-                fecha_prox_str = str(fecha_prox or "")
+            fecha_est = row.get("fecha_estimada", "")
+            try:
+                fecha_est_str = pd.to_datetime(fecha_est).strftime("%d/%m/%Y")
+            except Exception:
+                fecha_est_str = str(fecha_est or "")
 
             f = tk.Frame(inner, bg=bg, pady=5)
             f.pack(fill=tk.X, padx=2, pady=1)
-            tk.Label(f, text=fecha_env_str,              bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=18).pack(side=tk.LEFT, padx=(8, 4))
-            tk.Label(f, text=str(row.get("Cliente","")), bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=26).pack(side=tk.LEFT, padx=4)
-            tk.Label(f, text=str(row.get("Serial","")),  bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=20).pack(side=tk.LEFT, padx=4)
-            tk.Label(f, text=str(row.get("WhatsApp destino","")), bg=bg, fg=C_TEXT, font=(FONT_FAMILY, 10), anchor="w", width=16).pack(side=tk.LEFT, padx=4)
-            tk.Label(f, text=fecha_prox_str,             bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=15).pack(side=tk.LEFT, padx=4)
-            tk.Label(f, text=resultado,                  bg=bg, fg=fg_res,  font=(FONT_FAMILY, 10, "bold"), anchor="w", width=10).pack(side=tk.LEFT, padx=4)
+
+            tk.Label(f, text=fecha_env_str,                    bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=17).pack(side=tk.LEFT, padx=(8, 4))
+            tk.Label(f, text=str(row.get("cliente", "")),      bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=26).pack(side=tk.LEFT, padx=4)
+            tk.Label(f, text=str(row.get("serial", "")),       bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=16).pack(side=tk.LEFT, padx=4)
+            tk.Label(f, text=str(row.get("telefono", "")),     bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=14).pack(side=tk.LEFT, padx=4)
+            tk.Label(f, text=fecha_est_str,                    bg=bg, fg=C_TEXT,  font=(FONT_FAMILY, 10), anchor="w", width=14).pack(side=tk.LEFT, padx=4)
+
+            if estado == "pendiente":
+                # Botones ✓ y ✗
+                ttk.Button(
+                    f, text="✓", style="Success.TButton", width=3,
+                    command=lambda sid=seg_id: self._update_seguimiento(sid, "coordinado"),
+                ).pack(side=tk.LEFT, padx=(4, 2))
+                ttk.Button(
+                    f, text="✗", style="Danger.TButton", width=3,
+                    command=lambda sid=seg_id: self._update_seguimiento(sid, "sin_respuesta"),
+                ).pack(side=tk.LEFT, padx=(2, 8))
+            else:
+                tk.Label(
+                    f, text=_LABEL_ESTADO.get(estado, estado),
+                    bg=bg, fg=_FG_ESTADO.get(estado, C_TEXT),
+                    font=(FONT_FAMILY, 10, "bold"), anchor="w", width=16,
+                ).pack(side=tk.LEFT, padx=(4, 8))
+
+    def _update_seguimiento(self, seguimiento_id: int, estado: str) -> None:
+        try:
+            update_seguimiento_estado(self.settings, seguimiento_id, estado)
+            self._refresh()
+        except Exception as exc:
+            messagebox.showerror("Error", str(exc), parent=self.window)
 
     def _refresh(self) -> None:
         for tab in (self._tab_proximos, self._tab_vencidos, self._tab_enviados):
