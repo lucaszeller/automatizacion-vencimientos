@@ -1,0 +1,6 @@
+Guarda aca el JSON del Service Account de Google Cloud
+descargado desde: Google Cloud > IAM y administracion > Cuentas de servicio > Claves
+
+Renombralo a: google_service_account.json
+
+Esta carpeta esta en .gitignore: el JSON NO se sube al repositorio.

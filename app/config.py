@@ -48,6 +48,7 @@ class Settings:
     horas_para_proximo_service: float
     dias_service_semestral: int
     dias_service_trimestral: int
+    dias_service_anual: int
     reenviar_aviso: bool
     dias_conservar_reportes_diarios: int
     whatsapp_provider: str      # "meta" o "local"
@@ -63,6 +64,27 @@ class Settings:
     whatsapp_delay_max: int
     whatsapp_max_retries: int  # Reintentos si un envio falla (0 = sin reintentos)
     operario_whatsapp: str  # Numero del operario que coordina los services (para incluir en el mensaje)
+    # --- Hojas de ruta ---
+    google_credentials_path: Path   # JSON del service account de Google
+    sheet_pedidos_id: str           # ID del Google Sheet "Pedido de servicios"
+    sheet_pedidos_hoja: str         # Nombre de la pestana (vacio = primera)
+    sheet_registro_id: str          # Planilla de registro de tareas (historial de tiempos)
+    sheet_registro_hoja: str
+    ors_api_key: str                # API key de OpenRouteService
+    taller_direccion: str           # Direccion del taller (punto de partida)
+    taller_coords: str              # "lat,lon" del taller (opcional, evita geocodificar)
+    radio_alerta_km: float          # avisar si un lugar geocodifica mas lejos que esto
+    hojas_ruta_dir: Path
+    # --- Google Calendar ---
+    calendar_id_defecto: str        # calendario donde van los eventos
+    calendar_mecanicos: str         # "Pablo=mail1;Emiliano=mail2" (opcional)
+    calendar_eventos_viaje: bool    # crear bloques de viaje entre paradas
+    jornada_inicio: str             # "08:00"
+    jornada_max_horas: float        # advertir si el dia supera estas horas
+    zona_horaria: str
+    duracion_service_defecto: int   # minutos cuando no hay regla
+    duraciones_service: str         # "250 hs=60;semestral=120" (opcional)
+    usar_duraciones_historicas: bool
     output_dir: Path
     services_db_path: Path
     log_dir: Path
@@ -117,6 +139,7 @@ def load_settings(force_test: bool = False) -> Settings:
         horas_para_proximo_service=float(os.getenv("HORAS_PARA_PROXIMO_SERVICE", "250")),
         dias_service_semestral=int(os.getenv("DIAS_SERVICE_SEMESTRAL", "180")),
         dias_service_trimestral=int(os.getenv("DIAS_SERVICE_TRIMESTRAL", "90")),
+        dias_service_anual=int(os.getenv("DIAS_SERVICE_ANUAL", "365")),
         reenviar_aviso=_bool_env("REENVIAR_AVISO", False),
         dias_conservar_reportes_diarios=int(os.getenv("DIAS_CONSERVAR_REPORTES_DIARIOS", "30")),
         whatsapp_provider=os.getenv("WHATSAPP_PROVIDER", "meta").strip().lower(),
@@ -132,6 +155,27 @@ def load_settings(force_test: bool = False) -> Settings:
         whatsapp_delay_max=delay_max,
         whatsapp_max_retries=int(os.getenv("WHATSAPP_MAX_RETRIES", "2")),
         operario_whatsapp=os.getenv("OPERARIO_WHATSAPP", ""),
+        google_credentials_path=resolve_path(
+            os.getenv("GOOGLE_CREDENTIALS_PATH", "credenciales/google_service_account.json")
+        ),
+        sheet_pedidos_id=os.getenv("SHEET_PEDIDOS_ID", ""),
+        sheet_pedidos_hoja=os.getenv("SHEET_PEDIDOS_HOJA", ""),
+        sheet_registro_id=os.getenv("SHEET_REGISTRO_ID", ""),
+        sheet_registro_hoja=os.getenv("SHEET_REGISTRO_HOJA", "Registro"),
+        ors_api_key=os.getenv("ORS_API_KEY", ""),
+        taller_direccion=os.getenv("TALLER_DIRECCION", ""),
+        taller_coords=os.getenv("TALLER_COORDS", ""),
+        radio_alerta_km=float(os.getenv("RADIO_ALERTA_KM", "350")),
+        hojas_ruta_dir=resolve_path(os.getenv("HOJAS_RUTA_DIR", "data/hojas_ruta")),
+        calendar_id_defecto=os.getenv("CALENDAR_ID_DEFECTO", ""),
+        calendar_mecanicos=os.getenv("CALENDAR_MECANICOS", ""),
+        calendar_eventos_viaje=_bool_env("CALENDAR_EVENTOS_VIAJE", True),
+        jornada_inicio=os.getenv("JORNADA_INICIO", "08:00"),
+        jornada_max_horas=float(os.getenv("JORNADA_MAX_HORAS", "9")),
+        zona_horaria=os.getenv("ZONA_HORARIA", "America/Argentina/Buenos_Aires"),
+        duracion_service_defecto=int(os.getenv("DURACION_SERVICE_DEFECTO", "90")),
+        duraciones_service=os.getenv("DURACIONES_SERVICE", ""),
+        usar_duraciones_historicas=_bool_env("USAR_DURACIONES_HISTORICAS", True),
         output_dir=resolve_path(os.getenv("OUTPUT_DIR", "data/reportes")),
         services_db_path=resolve_path(os.getenv("SERVICES_DB_PATH", "data/services.db")),
         log_dir=resolve_path(os.getenv("LOG_DIR", "data/logs")),
@@ -150,5 +194,7 @@ def ensure_directories(settings: Settings) -> None:
         settings.enviados_dir,
         settings.errores_dir,
         settings.respaldos_dir,
+        settings.hojas_ruta_dir,
+        settings.google_credentials_path.parent,
     ):
         path.mkdir(parents=True, exist_ok=True)

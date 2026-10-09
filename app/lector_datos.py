@@ -14,6 +14,9 @@ REQUIRED_COLUMNS = [
     "cliente",
     "equipo",
     "serial",
+    "serie_equipo",
+    "marca_equipo",
+    "modelo_equipo",
     "fecha_service",
     "numero_soporte",
     "horas",
@@ -68,6 +71,9 @@ def normalize_service_data(df: pd.DataFrame) -> pd.DataFrame:
     normalized["cliente"] = normalized["cliente"].map(clean_text)
     normalized["equipo"] = normalized["equipo"].map(clean_text)
     normalized["serial"] = normalized["serial"].map(clean_text)
+    normalized["serie_equipo"]  = normalized["serie_equipo"].map(clean_text)
+    normalized["marca_equipo"]  = normalized["marca_equipo"].map(clean_text)
+    normalized["modelo_equipo"] = normalized["modelo_equipo"].map(clean_text)
     normalized["numero_soporte"] = normalized["numero_soporte"].map(clean_text)
     normalized["tipo_service"] = normalized["tipo_service"].map(clean_text)
     normalized["lugar"] = normalized["lugar"].map(clean_text)
@@ -111,6 +117,11 @@ def _complete_tipo_service(row: pd.Series) -> str:
     # trimestral: "servicio trimestral", "service trimestral", etc.
     if re.search(r"servi(?:cio|ce)\s+(?:de\s+)?(?:mantenimiento\s+)?(?:preventivo\s+)?trimestral", text, flags=re.IGNORECASE):
         return "trimestral"
+    # anual: "servicio anual", "service anual", "mantenimiento anual", etc.
+    if re.search(r"(?:servi(?:cio|ce)|mantenimiento)\s+(?:de\s+)?(?:preventivo\s+)?anual", text, flags=re.IGNORECASE):
+        return "anual"
+    if re.search(r"preventivo\s+anual", text, flags=re.IGNORECASE):
+        return "anual"
     # km
     match = re.search(r"servi(?:cio|ce)\s+([0-9][0-9.\s]*)\s*_?\s*km", text, flags=re.IGNORECASE)
     if match:

@@ -11,3 +11,5 @@ data/enviados/*.xlsx
 data/logs/*.txt
 data/errores/*.txt
 data/entrada/servicios_prueba.xlsx
+
+credenciales/*.json

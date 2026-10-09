@@ -1,0 +1,12 @@
+2026/07/15-11:22:02.703 5200 Reusing MANIFEST C:\Users\Lucas\Desktop\trabajo\PORTA\AUTOMATICAZION MAILS\automatizacion-vencimientos\whatsapp-server\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/07/15-11:22:02.704 5200 Recovering log #4
+2026/07/15-11:22:02.815 5200 Reusing old log C:\Users\Lucas\Desktop\trabajo\PORTA\AUTOMATICAZION MAILS\automatizacion-vencimientos\whatsapp-server\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000004.log 
+2026/07/15-11:22:29.339 23c4 Level-0 table #8: started
+2026/07/15-11:22:29.414 23c4 Level-0 table #8: 1145365 bytes OK
+2026/07/15-11:22:29.420 23c4 Delete type=0 #4
+2026/07/15-11:29:05.191 5200 Compacting 1@1 + 1@2 files
+2026/07/15-11:29:05.298 5200 Generated table #9@1: 22345 keys, 818847 bytes
+2026/07/15-11:29:05.298 5200 Compacted 1@1 + 1@2 files => 818847 bytes
+2026/07/15-11:29:05.301 5200 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/07/15-11:29:05.302 5200 Delete type=2 #5
+2026/07/15-11:29:05.302 5200 Delete type=2 #8

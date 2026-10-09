@@ -105,6 +105,9 @@ def _base_output(current: pd.Series, previous: pd.Series | None) -> dict:
         "cliente": clean_text(current.get("cliente")),
         "equipo": clean_text(current.get("equipo")),
         "serial": clean_text(current.get("serial")),
+        "serie_equipo": clean_text(current.get("serie_equipo")),
+        "marca_equipo": clean_text(current.get("marca_equipo")),
+        "modelo_equipo": clean_text(current.get("modelo_equipo")),
         "lugar": clean_text(current.get("lugar")),
         "mail_cliente": clean_text(current.get("mail_cliente")),
         "telefono_cliente": clean_text(current.get("telefono_cliente")),
@@ -135,6 +138,7 @@ def _base_output(current: pd.Series, previous: pd.Series | None) -> dict:
 _TIME_BASED_INTERVALS = {
     "semestral": "dias_service_semestral",
     "trimestral": "dias_service_trimestral",
+    "anual": "dias_service_anual",
 }
 
 

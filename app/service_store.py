@@ -196,45 +196,103 @@ def record_seguimiento(
     equipo: str,
     fecha_estimada: str,
     telefono: str,
+    mensaje: str = "",
 ) -> int:
-    """Registra un envio manual para seguimiento. Retorna el id generado."""
+    """Registra un envio manual para seguimiento. Retorna el id generado.
+
+    `mensaje` guarda el texto exacto que se envio, para poder reenviarlo
+    identico desde la pantalla de revision si el cliente no responde.
+    """
     init_store(settings)
     now = datetime.now().isoformat(timespec="seconds")
     with sqlite3.connect(settings.services_db_path) as connection:
         cursor = connection.execute(
             """
-            INSERT INTO seguimiento (aviso_id, cliente, serial, equipo, fecha_estimada, telefono, fecha_envio, estado)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')
+            INSERT INTO seguimiento
+                (aviso_id, cliente, serial, equipo, fecha_estimada, telefono,
+                 fecha_envio, estado, mensaje, reenvios)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, 0)
             """,
             (
                 clean_text(aviso_id), clean_text(cliente), clean_text(serial),
                 clean_text(equipo), clean_text(fecha_estimada), clean_text(telefono), now,
+                mensaje or "",
             ),
         )
         return cursor.lastrowid
 
 
-def update_seguimiento_estado(settings: Settings, seguimiento_id: int, estado: str) -> None:
-    """Actualiza el estado de un registro de seguimiento (coordinado / sin_respuesta)."""
+def get_seguimiento(settings: Settings, seguimiento_id: int) -> dict | None:
+    """Devuelve un registro de seguimiento completo, o None si no existe."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        fila = connection.execute(
+            "SELECT * FROM seguimiento WHERE id = ?", (seguimiento_id,)
+        ).fetchone()
+    return dict(fila) if fila is not None else None
+
+
+def registrar_reenvio(settings: Settings, seguimiento_id: int) -> int:
+    """Marca un seguimiento como reenviado: vuelve a 'pendiente' y suma 1.
+
+    Retorna la cantidad total de reenvios del registro.
+    """
     init_store(settings)
     now = datetime.now().isoformat(timespec="seconds")
     with sqlite3.connect(settings.services_db_path) as connection:
         connection.execute(
-            "UPDATE seguimiento SET estado = ?, fecha_respuesta = ? WHERE id = ?",
-            (estado, now, seguimiento_id),
+            """
+            UPDATE seguimiento
+               SET estado = 'pendiente',
+                   reenvios = COALESCE(reenvios, 0) + 1,
+                   fecha_reenvio = ?,
+                   fecha_respuesta = NULL
+             WHERE id = ?
+            """,
+            (now, seguimiento_id),
         )
+        fila = connection.execute(
+            "SELECT COALESCE(reenvios, 0) FROM seguimiento WHERE id = ?",
+            (seguimiento_id,),
+        ).fetchone()
+    return fila[0] if fila else 0
+
+
+def update_seguimiento_estado(
+    settings: Settings,
+    seguimiento_id: int,
+    estado: str,
+    fecha_coordinada: str = "",
+) -> None:
+    """Actualiza el estado de un registro de seguimiento (coordinado / sin_respuesta)."""
+    init_store(settings)
+    now = datetime.now().isoformat(timespec="seconds")
+    with sqlite3.connect(settings.services_db_path) as connection:
+        if fecha_coordinada:
+            connection.execute(
+                "UPDATE seguimiento SET estado = ?, fecha_respuesta = ?, fecha_coordinada = ? WHERE id = ?",
+                (estado, now, clean_text(fecha_coordinada), seguimiento_id),
+            )
+        else:
+            connection.execute(
+                "UPDATE seguimiento SET estado = ?, fecha_respuesta = ? WHERE id = ?",
+                (estado, now, seguimiento_id),
+            )
 
 
 def list_seguimiento(settings: Settings) -> pd.DataFrame:
-    """Lista todos los registros de seguimiento, mas recientes primero."""
+    """Lista registros pendientes o sin_respuesta (coordinados pasan al historial)."""
     init_store(settings)
     with sqlite3.connect(settings.services_db_path) as connection:
         return pd.read_sql_query(
             """
             SELECT id, aviso_id, cliente, serial, equipo, fecha_estimada,
-                   telefono, fecha_envio, estado, fecha_respuesta
+                   telefono, fecha_envio, estado, fecha_respuesta,
+                   COALESCE(reenvios, 0) AS reenvios, fecha_reenvio
             FROM seguimiento
-            ORDER BY fecha_envio DESC
+            WHERE estado != 'coordinado'
+            ORDER BY COALESCE(fecha_reenvio, fecha_envio) DESC
             """,
             connection,
         )
@@ -248,6 +306,116 @@ def get_seguimiento_aviso_ids(settings: Settings) -> set[str]:
             "SELECT DISTINCT aviso_id FROM seguimiento"
         ).fetchall()
     return {row[0] for row in rows if row[0]}
+
+
+def list_historial(settings: Settings) -> pd.DataFrame:
+    """Historial completo de envíos reales: automáticos (avisos) + manuales (seguimiento).
+    Excluye simulados. Incluye fecha_coordinada editable."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        query = """
+            SELECT
+                a.id            AS row_id,
+                'avisos'        AS fuente,
+                a.fecha_aviso   AS fecha_envio,
+                'Automático'    AS tipo,
+                COALESCE(s.cliente, '') AS cliente,
+                COALESCE(s.serial,  '') AS serial,
+                COALESCE(s.equipo,  '') AS equipo,
+                a.destino       AS telefono,
+                a.resultado     AS resultado,
+                NULL            AS estado,
+                COALESCE(a.fecha_coordinada, '') AS fecha_coordinada
+            FROM avisos a
+            LEFT JOIN services s ON s.aviso_id = a.aviso_id
+            WHERE a.resultado = 'ENVIADO'
+
+            UNION ALL
+
+            SELECT
+                id              AS row_id,
+                'seguimiento'   AS fuente,
+                fecha_envio,
+                'Manual'        AS tipo,
+                COALESCE(cliente, '') AS cliente,
+                COALESCE(serial,  '') AS serial,
+                COALESCE(equipo,  '') AS equipo,
+                telefono,
+                'ENVIADO'       AS resultado,
+                estado,
+                COALESCE(fecha_coordinada, '') AS fecha_coordinada
+            FROM seguimiento
+
+            ORDER BY fecha_envio DESC
+        """
+        df = pd.read_sql_query(query, connection)
+    return df
+
+
+def desestimar_service(
+    settings: Settings,
+    aviso_id: str,
+    cliente: str = "",
+    serial: str = "",
+    equipo: str = "",
+    fecha_estimada: str = "",
+) -> None:
+    """Marca un aviso puntual como desestimado (no vuelve a aparecer en Proximos/Vencidos)."""
+    init_store(settings)
+    now = datetime.now().isoformat(timespec="seconds")
+    with sqlite3.connect(settings.services_db_path) as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO descartados (aviso_id, fecha, cliente, serial, equipo, fecha_estimada)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (clean_text(aviso_id), now, clean_text(cliente),
+             clean_text(serial), clean_text(equipo), clean_text(fecha_estimada)),
+        )
+
+
+def restaurar_service(settings: Settings, aviso_id: str) -> None:
+    """Quita un aviso de descartados para que vuelva a aparecer."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        connection.execute("DELETE FROM descartados WHERE aviso_id = ?", (clean_text(aviso_id),))
+
+
+def get_desestimados_aviso_ids(settings: Settings) -> set[str]:
+    """Retorna el conjunto de aviso_ids desestimados."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        rows = connection.execute("SELECT aviso_id FROM descartados").fetchall()
+    return {row[0] for row in rows if row[0]}
+
+
+def list_descartados(settings: Settings) -> pd.DataFrame:
+    """Lista todos los services desestimados."""
+    init_store(settings)
+    with sqlite3.connect(settings.services_db_path) as connection:
+        return pd.read_sql_query(
+            """
+            SELECT aviso_id, fecha AS fecha_descarte,
+                   COALESCE(cliente, '') AS cliente,
+                   COALESCE(serial,  '') AS serial,
+                   COALESCE(equipo,  '') AS equipo,
+                   COALESCE(fecha_estimada, '') AS fecha_estimada
+            FROM descartados
+            ORDER BY fecha DESC
+            """,
+            connection,
+        )
+
+
+def update_historial_fecha_coordinada(settings: Settings, fuente: str, row_id: int, fecha: str) -> None:
+    """Guarda la fecha coordinada de asistencia en la tabla correspondiente."""
+    init_store(settings)
+    table = "seguimiento" if fuente == "seguimiento" else "avisos"
+    with sqlite3.connect(settings.services_db_path) as connection:
+        connection.execute(
+            f"UPDATE {table} SET fecha_coordinada = ? WHERE id = ?",
+            (clean_text(fecha) or None, row_id),
+        )
 
 
 def record_notice(settings: Settings, row: pd.Series, resultado: str, error: str = "") -> None:
@@ -337,7 +505,30 @@ def init_store(settings: Settings) -> None:
             )
             """
         )
-        _ensure_column(connection, "services", "contact_key", "TEXT")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS descartados (
+                aviso_id   TEXT PRIMARY KEY,
+                fecha      TEXT NOT NULL,
+                cliente    TEXT,
+                serial     TEXT,
+                equipo     TEXT,
+                fecha_estimada TEXT
+            )
+            """
+        )
+        _ensure_column(connection, "descartados", "cliente",       "TEXT")
+        _ensure_column(connection, "descartados", "serial",        "TEXT")
+        _ensure_column(connection, "descartados", "equipo",        "TEXT")
+        _ensure_column(connection, "descartados", "fecha_estimada","TEXT")
+        _ensure_column(connection, "services",     "contact_key",       "TEXT")
+        _ensure_column(connection, "avisos",       "fecha_coordinada",  "TEXT")
+        _ensure_column(connection, "seguimiento",  "fecha_coordinada",  "TEXT")
+        # Reenvio de avisos sin respuesta: se guarda el texto enviado para
+        # poder repetirlo identico, y se cuenta cuantas veces se reenvio.
+        _ensure_column(connection, "seguimiento",  "mensaje",           "TEXT")
+        _ensure_column(connection, "seguimiento",  "reenvios",          "INTEGER DEFAULT 0")
+        _ensure_column(connection, "seguimiento",  "fecha_reenvio",     "TEXT")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_services_next_date ON services(fecha_estimada_proximo_service)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_services_contact_key ON services(contact_key)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_avisos_aviso_id ON avisos(aviso_id)")

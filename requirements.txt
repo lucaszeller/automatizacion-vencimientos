@@ -5,3 +5,7 @@ pyodbc
 SQLAlchemy
 PyMySQL
 Jinja2
+gspread
+google-auth
+requests
+reportlab

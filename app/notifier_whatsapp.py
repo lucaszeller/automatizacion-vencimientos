@@ -12,6 +12,7 @@ import pandas as pd
 
 from app.config import Settings
 from app.service_store import get_sent_aviso_ids, record_notice
+from app.utils import clean_text
 
 
 def dynamic_delay(min_sec: int, max_sec: int, logger=None) -> float:
@@ -201,9 +202,39 @@ def _parse_model_serial(equipo: str) -> tuple[str, str]:
     return str(equipo).strip(), ""
 
 
+def _build_modelo(row: pd.Series, equipo: str) -> str:
+    """Arma el modelo a mostrar: 'HELI CPCD25 H2000'.
+
+    Usa marca + modelo de la solapa Info de Tactica. Evita repetir la marca
+    si ya viene dentro del modelo. Si no hay datos cargados, cae al
+    identificador interno sin el numero entre parentesis.
+    """
+    marca = clean_text(row.get("marca_equipo", ""))
+    modelo = clean_text(row.get("modelo_equipo", ""))
+
+    if modelo:
+        if marca and marca.lower() not in modelo.lower():
+            return f"{marca} {modelo}"
+        return modelo
+    if marca:
+        return marca
+
+    interno, _ = _parse_model_serial(equipo)
+    return interno
+
+
 def build_service_message(row: pd.Series, operario_whatsapp: str = "") -> str:
     equipo = row.get("equipo", "")
-    modelo, nro_serie = _parse_model_serial(equipo)
+
+    # Lo que Tactica guarda como "Nro de Serie" ("HELI Nº 1 (3246)") es un
+    # identificador interno: ni el modelo ni la serie del equipo. Los datos
+    # reales vienen de la solapa Info (marca, modelo y serie), que el SQL trae
+    # como marca_equipo / modelo_equipo / serie_equipo.
+    # Si no estan cargados se cae al identificador interno para el modelo, y
+    # se omite la linea de serie antes que mandar un numero que no es el suyo.
+    nro_serie = clean_text(row.get("serie_equipo", ""))
+    modelo = _build_modelo(row, equipo)
+
     due_date = row.get("fecha_estimada_proximo_service", "")
     if hasattr(due_date, "strftime"):
         due_date_str = due_date.strftime("%d/%m/%Y")

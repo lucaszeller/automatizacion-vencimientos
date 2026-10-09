@@ -3,6 +3,39 @@ SELECT
     e.Empresa AS cliente,
     ns.Numero AS equipo,
     ns.Numero AS serial,
+    -- Datos reales del equipo (solapa Info del Nro de Serie en Tactica).
+    -- Viven en la tabla info, colgados del registro de compra del equipo:
+    --   productosstocknroserie <- compraproductos.IDNroSerie <- info.IDRef
+    --     Campo1 = MARCA    Campo2 = MODELO    Campo5 = SERIE
+    -- ns.Numero ("HELI Nº 1 (3246)") es el identificador interno de Tactica,
+    -- NO la serie ni el modelo del equipo.
+    (
+        SELECT NULLIF(TRIM(i2.Campo5), '')
+        FROM compraproductos cp
+        INNER JOIN info i2 ON i2.IDRef = cp.RecID
+        WHERE cp.IDNroSerie = ns.RecID
+          AND NULLIF(TRIM(i2.Campo5), '') IS NOT NULL
+        ORDER BY cp.FechaCompra DESC, cp.RecID DESC
+        LIMIT 1
+    ) AS serie_equipo,
+    (
+        SELECT NULLIF(TRIM(i2.Campo1), '')
+        FROM compraproductos cp
+        INNER JOIN info i2 ON i2.IDRef = cp.RecID
+        WHERE cp.IDNroSerie = ns.RecID
+          AND NULLIF(TRIM(i2.Campo5), '') IS NOT NULL
+        ORDER BY cp.FechaCompra DESC, cp.RecID DESC
+        LIMIT 1
+    ) AS marca_equipo,
+    (
+        SELECT NULLIF(TRIM(i2.Campo2), '')
+        FROM compraproductos cp
+        INNER JOIN info i2 ON i2.IDRef = cp.RecID
+        WHERE cp.IDNroSerie = ns.RecID
+          AND NULLIF(TRIM(i2.Campo5), '') IS NOT NULL
+        ORDER BY cp.FechaCompra DESC, cp.RecID DESC
+        LIMIT 1
+    ) AS modelo_equipo,
     -- Usar Campo2 solo si su año coincide con el de s.Fecha (evita typos de año como 2024 en vez de 2025)
     CASE
         WHEN STR_TO_DATE(NULLIF(i.Campo2, ''), '%d/%m/%Y') IS NOT NULL
